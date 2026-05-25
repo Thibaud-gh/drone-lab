@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Drone Lab — let's go flying</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,0..100;1,9..144,300..900,0..100&family=Lexend:wght@300..700&family=Caveat:wght@500..700&display=swap"
+      rel="stylesheet"
+    />
+
+    <link rel="stylesheet" href="styles.css" />
+
+    <script src="https://unpkg.com/blockly@11/blockly_compressed.js"></script>
+    <script src="https://unpkg.com/blockly@11/blocks_compressed.js"></script>
+    <script src="https://unpkg.com/blockly@11/msg/en.js"></script>
+    <script src="https://unpkg.com/blockly@11/python_compressed.js"></script>
+    <script src="https://unpkg.com/blockly@11/javascript_compressed.js"></script>
+  </head>
+  <body>
+    <!-- paper grain overlay (sits over everything, very subtle) -->
+    <div class="grain" aria-hidden="true"></div>
+
+    <!-- decorative scribbles floating on the page background -->
+    <svg class="scribble scribble--sun" viewBox="0 0 120 120" aria-hidden="true">
+      <g fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+        <circle cx="60" cy="60" r="22" />
+        <path d="M60 18 V8 M60 112 V102 M18 60 H8 M112 60 H102
+                 M30 30 L23 23 M90 30 L97 23 M30 90 L23 97 M90 90 L97 97" />
+      </g>
+    </svg>
+
+    <svg class="scribble scribble--cloud" viewBox="0 0 200 100" aria-hidden="true">
+      <path d="M30,70 Q10,70 14,52 Q18,38 36,42 Q40,22 64,24 Q88,18 96,40 Q120,32 130,52 Q160,46 162,68 Q170,86 144,86 L48,86 Q26,88 30,70 Z"
+            fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" />
+    </svg>
+
+    <svg class="scribble scribble--arrow" viewBox="0 0 160 80" aria-hidden="true">
+      <path d="M8,42 Q60,8 110,40 T152,38" fill="none" stroke="currentColor"
+            stroke-width="2.4" stroke-linecap="round" stroke-dasharray="0 0" />
+      <path d="M142,28 L154,38 L142,50" fill="none" stroke="currentColor"
+            stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+    </svg>
+
+    <header class="masthead">
+      <div class="masthead__title">
+        <svg class="masthead__icon" viewBox="0 0 64 64" aria-hidden="true">
+          <g fill="none" stroke="currentColor" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round">
+            <path d="M6 38 L32 12 L58 38 L46 38 L32 24 L18 38 Z" fill="#F0A93B" fill-opacity="0.35" />
+            <path d="M14 38 L32 50 L50 38" />
+            <circle cx="32" cy="24" r="2.4" fill="currentColor" />
+          </g>
+        </svg>
+        <h1>Drone Lab</h1>
+        <span class="masthead__tag">let's go flying</span>
+      </div>
+
+      <div class="masthead__controls">
+        <div class="mode-toggle" role="group" aria-label="Where the drone flies">
+          <button class="mode-toggle__btn is-active" data-mode="sim" type="button">
+            <span class="mode-toggle__dot"></span>pretend
+          </button>
+          <button class="mode-toggle__btn" data-mode="real" type="button" disabled>
+            <span class="mode-toggle__dot"></span>real drone
+          </button>
+        </div>
+
+        <button id="run-btn" class="btn btn--go" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M3 12 L21 4 L14 12 L21 20 Z" fill="currentColor" />
+          </svg>
+          <span>fly!</span>
+        </button>
+
+        <button id="stop-btn" class="btn btn--stop" type="button" disabled
+                title="only in real-drone mode (for emergency landing)">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" />
+          </svg>
+          <span>land</span>
+        </button>
+      </div>
+    </header>
+
+    <main class="stage">
+      <!-- PALETTE -->
+      <section class="card card--palette" aria-label="Block palette">
+        <div class="card__tab card__tab--palette">
+          <span class="card__tab-num">1</span>
+          <span class="card__tab-label">pick a block</span>
+        </div>
+        <div id="palette" class="palette">
+          <!-- tiles injected by app.js so block defs stay the source of truth -->
+        </div>
+      </section>
+
+      <!-- WORKSPACE -->
+      <section class="card card--blocks" aria-label="Blocks workspace">
+        <div class="card__tab card__tab--blocks">
+          <span class="card__tab-num">2</span>
+          <span class="card__tab-label">your flight plan</span>
+        </div>
+        <button class="card__action" id="clear-btn" type="button" title="throw away all blocks">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M5 7 H19 M9 7 V5 a2 2 0 0 1 2 -2 h2 a2 2 0 0 1 2 2 V7
+                     M7 7 L8 20 a2 2 0 0 0 2 2 h4 a2 2 0 0 0 2 -2 L17 7"
+                  fill="none" stroke="currentColor" stroke-width="2"
+                  stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          <span>start over</span>
+        </button>
+        <div id="blockly-host" class="blockly-host">
+          <div id="workspace-hint" class="workspace-hint" aria-hidden="true">
+            <svg viewBox="0 0 160 80" class="workspace-hint__arrow">
+              <path d="M12,42 Q60,12 110,40 T152,38" fill="none"
+                    stroke="currentColor" stroke-width="2.4"
+                    stroke-linecap="round" stroke-dasharray="4 5" />
+              <path d="M142,28 L154,38 L142,50" fill="none" stroke="currentColor"
+                    stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <p class="workspace-hint__text">tap a block over there<br/>or drag it here</p>
+            <p class="workspace-hint__sub">stack more to make a flight plan</p>
+          </div>
+          <span class="trash-hint" aria-hidden="true">drag here<br/>to throw away</span>
+        </div>
+      </section>
+
+      <!-- SIMULATOR -->
+      <section class="card card--sim" aria-label="Flight simulator">
+        <div class="card__tab card__tab--sim">
+          <span class="card__tab-num">3</span>
+          <span class="card__tab-label">watch it fly</span>
+        </div>
+
+        <div class="sim">
+          <div class="sim__sky">
+            <svg class="sim__sky-bird" viewBox="0 0 60 30" aria-hidden="true">
+              <path d="M4 18 Q14 6 24 18 Q34 6 44 18" fill="none"
+                    stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            </svg>
+          </div>
+          <canvas id="sim-canvas" width="640" height="480"></canvas>
+
+          <div class="sim__hud">
+            <div class="sim__chip">
+              <span class="sim__chip-label">height</span>
+              <span class="sim__chip-value" id="hud-height">0<span class="sim__chip-unit">cm</span></span>
+            </div>
+            <div class="sim__chip">
+              <span class="sim__chip-label">battery</span>
+              <span class="sim__chip-value">98<span class="sim__chip-unit">%</span></span>
+            </div>
+          </div>
+
+          <div class="sim__status" id="sim-status">
+            <span class="sim__status-dot"></span>
+            <span id="sim-status-text">ready when you are</span>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- DEBUG DRAWER (grown-ups only) -->
+    <section class="drawer" id="drawer" data-state="closed" aria-label="Generated Python (debug)">
+      <button class="drawer__handle" type="button"
+              aria-controls="drawer-body" aria-expanded="false" id="drawer-toggle">
+        <svg viewBox="0 0 24 24" class="drawer__icon" aria-hidden="true">
+          <path d="M2 12 Q12 4 22 12 Q12 20 2 12 Z" fill="none" stroke="currentColor" stroke-width="2"/>
+          <circle cx="12" cy="12" r="3" fill="currentColor"/>
+        </svg>
+        <span class="drawer__title">grown-ups: the python</span>
+        <span class="drawer__hint">peek at what the drone actually reads</span>
+        <span class="drawer__chevron" aria-hidden="true">▾</span>
+      </button>
+      <div class="drawer__body" id="drawer-body">
+        <pre class="code__pre"><code id="code-out"># add some blocks over there ↑
+# this is where their secret recipe shows up</code></pre>
+      </div>
+    </section>
+
+    <footer class="footnote">
+      <span class="footnote__pin">★</span>
+      <span>built on a Saturday — by you and your kid</span>
+    </footer>
+
+    <script src="theme.js"></script>
+    <script src="blocks.js"></script>
+    <script src="generator.js"></script>
+    <script src="simulator.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
