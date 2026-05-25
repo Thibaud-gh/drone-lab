@@ -1,24 +1,29 @@
 # Drone Lab
 
-A block-coding app for flying a Bitcraze Crazyflie 2.1+ — built for a 5-to-7-year-old. See [../blockly_handoff.md](../blockly_handoff.md) for the full project brief.
+A block-coding app for flying a Bitcraze Crazyflie 2.1+ — built for a 5-to-7-year-old. See [../blockly_handoff.md](../blockly_handoff.md) for the full project brief, and [../CLAUDE.md](../CLAUDE.md) for architecture + UX decisions.
 
 ## Running
 
 ```sh
-# 1. Open the frontend (no build step)
+# Frontend — no build step. Either open directly:
 open frontend/index.html
+# ...or serve (some browsers prefer this):
+python3 -m http.server 5173 --directory frontend
 
-# 2. Later — the Python bridge that talks to the real drone
-pip install -r bridge/requirements.txt
-python bridge/server.py
+# Bridge — Python WebSocket server (stub, not yet wired):
+cd bridge && uv sync && uv run python server.py
 ```
 
-For now the frontend runs the simulator entirely in the browser. The bridge is stubbed and not wired in yet.
+For now the frontend runs the simulator entirely in the browser. The bridge is stubbed; wiring it to a real (or [CrazySim-simulated](../SETUP.md)) Crazyflie is the next slice.
 
 ## Layout
 
 ```
-frontend/   # Blockly UI + 2D simulator
-bridge/     # Python WebSocket server (cflib glue)
+frontend/   # Blockly UI + 2D simulator (HTML/CSS/JS, no build step)
+bridge/     # Python WebSocket server (cflib glue) — uv-managed
 examples/   # Saved block programs (one per curriculum project)
 ```
+
+## First time on a new machine?
+
+See [../SETUP.md](../SETUP.md) for the macOS install path, including CrazySim (Bitcraze's software-in-the-loop simulator) so you can develop the bridge without owning a real drone.
