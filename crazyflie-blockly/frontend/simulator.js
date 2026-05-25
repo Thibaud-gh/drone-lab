@@ -200,12 +200,10 @@ class SimDrone {
     ctx.restore();
 
     // level zones (target areas) — drawn under the trail so the trail
-    // remains readable as it crosses them
+    // remains readable as it crosses them. The 30cm reference scale lives
+    // as an HTML overlay (.sim__scale) so it can't get clipped by the
+    // canvas's rounded corner.
     this._drawZones(ctx);
-
-    // a small ruler in the bottom-right corner — gives the kid a visual
-    // sense of "how far is 30cm" so she can estimate distances by eye
-    this._drawScaleBar(ctx);
 
     // trail — persists until drone.reset() clears it (cleared on next fly!
     // or when the kid presses reset). Capped at 2000 points upstream.
@@ -254,32 +252,6 @@ class SimDrone {
       ctx.stroke();
       ctx.setLineDash([]);
     }
-    ctx.restore();
-  }
-
-  _drawScaleBar(ctx) {
-    const cssW = this.canvas._cssW || this.canvas.width;
-    const cssH = this.canvas._cssH || this.canvas.height;
-    const len_cm = 30;
-    const len_px = len_cm * PX_PER_CM;
-    const x = cssW - len_px - 18;
-    const y = cssH - 22;
-    ctx.save();
-    ctx.strokeStyle = 'rgba(26,42,64,0.7)';
-    ctx.lineWidth = 2;
-    ctx.lineCap = 'round';
-    // hash marks on each end
-    ctx.beginPath();
-    ctx.moveTo(x, y - 5);             ctx.lineTo(x, y + 5);
-    ctx.moveTo(x + len_px, y - 5);    ctx.lineTo(x + len_px, y + 5);
-    ctx.moveTo(x, y);                 ctx.lineTo(x + len_px, y);
-    ctx.stroke();
-    // label
-    ctx.fillStyle = 'rgba(26,42,64,0.85)';
-    ctx.font = '500 11px "Lexend", system-ui, sans-serif';
-    ctx.textBaseline = 'top';
-    ctx.textAlign = 'center';
-    ctx.fillText(`${len_cm} cm`, x + len_px / 2, y + 7);
     ctx.restore();
   }
 

@@ -714,6 +714,25 @@ body[data-mode="sim"] .sim__chip--battery { display: none; }
   box-shadow: 0 0 0 3px rgba(70,163,122,0.25);
   animation: pulse 1.6s ease-in-out infinite;
 }
+
+.sim__scale {
+  position: absolute;
+  bottom: 12px;
+  right: 16px;
+  z-index: 3;
+  pointer-events: none;
+  text-align: center;
+  color: rgba(26,42,64,0.7);
+}
+.sim__scale-bar { display: block; }
+.sim__scale-label {
+  display: block;
+  font-family: var(--font-body);
+  font-weight: 500;
+  font-size: 11px;
+  color: var(--ink-soft);
+  margin-top: 2px;
+}
 .sim__status.is-flying  .sim__status-dot { background: var(--flight); box-shadow: 0 0 0 3px rgba(231,111,81,0.25); }
 .sim__status.is-stopped .sim__status-dot { background: var(--stop);   box-shadow: 0 0 0 3px rgba(208,69,67,0.25);  }
 
