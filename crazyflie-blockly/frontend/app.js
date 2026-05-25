@@ -211,6 +211,70 @@
 
   const drone = new SimDrone(canvas, hud);
 
+  // ----- Levels ----------------------------------------------------------
+  const LEVELS = window.LEVELS || [];
+  const captionEl  = document.getElementById('sim-caption');
+  const tabsEl     = document.getElementById('level-tabs');
+  let currentLevel = LEVELS[0];
+
+  function buildLevelTabs() {
+    tabsEl.innerHTML = '';
+    LEVELS.forEach((lvl) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'level-tab';
+      btn.dataset.level = String(lvl.id);
+      btn.textContent = String(lvl.id);
+      btn.title = lvl.caption;
+      btn.addEventListener('click', () => setLevel(lvl.id));
+      tabsEl.appendChild(btn);
+    });
+  }
+
+  function setLevel(id) {
+    const lvl = LEVELS.find(l => l.id === id);
+    if (!lvl) return;
+    currentLevel = lvl;
+    captionEl.textContent = lvl.caption;
+    drone.setLevel(lvl);
+    drone.reset();
+    setResetMode(false);
+    // mark active tab
+    tabsEl.querySelectorAll('.level-tab').forEach(b => {
+      b.classList.toggle('is-active', Number(b.dataset.level) === id);
+    });
+  }
+
+  function evaluateWin(d, level) {
+    // Errors take precedence — keep the kid-friendly explanation.
+    if (d._lastError) return { won: false, reason: d._lastError };
+    if (d.flying)    return { won: false, reason: "you didn't land!" };
+    switch (level.win?.type) {
+      case 'land_anywhere':
+        return { won: true };
+      case 'land_in_zone': {
+        const z = level.zones[level.win.zone];
+        if (!z) return { won: true };
+        const home = { x: canvas._cssW / 2, y: canvas._cssH - 70 };
+        const zx = home.x + (z.x_cm ?? 0) * 3.2;
+        const zy = home.y + (z.y_cm ?? 0) * 3.2;
+        const hw = (z.w_cm ?? 30) * 3.2 / 2;
+        const hh = (z.h_cm ?? 30) * 3.2 / 2;
+        const inX = Math.abs(d.x - zx) <= hw;
+        const inY = Math.abs(d.y - zy) <= hh;
+        return inX && inY
+          ? { won: true }
+          : { won: false, reason: 'you landed in the wrong area' };
+      }
+      default:
+        return { won: true };
+    }
+  }
+
+  // (initialised at the very bottom of the IIFE after setResetMode + resetMode
+  // are declared — otherwise setLevel(0)'s call to setResetMode(false) trips
+  // a temporal-dead-zone read on `let resetMode`.)
+
   // ----- Live code (in the debug drawer) ---------------------------------
   const codeOut = document.getElementById('code-out');
   const pyGen   = python.pythonGenerator;
@@ -326,7 +390,9 @@
       drone._lastError = msg.message;
       drone._setStatus(msg.message, 'stopped');
     } else if (msg.op === 'done') {
-      drone._setStatus('flight complete ✨', 'idle');
+      const result = evaluateWin(drone, currentLevel);
+      if (result.won) drone._setStatus('flight complete ✨', 'idle');
+      else            drone._setStatus(result.reason, 'stopped');
     }
   });
   bridge.connect();
@@ -385,14 +451,12 @@
       // If the kid pressed reset mid-flight, drone._gen has moved on.
       // Reset already set status to "ready when you are"; don't overwrite.
       if (drone._gen !== flightGen) return;
-      if (drone._lastError) {
-        // _setStatus was already called in _fail(); leave it on screen.
-      } else if (drone._stopped) {
+      if (drone._stopped) {
         // stop button already set its own message.
-      } else if (drone.flying) {
-        drone._setStatus("flight complete ✨ — but the drone is still in the air!", 'stopped');
       } else {
-        drone._setStatus('flight complete ✨', 'idle');
+        const result = evaluateWin(drone, currentLevel);
+        if (result.won) drone._setStatus('flight complete ✨', 'idle');
+        else            drone._setStatus(result.reason, 'stopped');
       }
     } catch (err) {
       console.error(err);
@@ -476,4 +540,10 @@
       }
     }, 2400);
   }
+
+  // ----- Boot ------------------------------------------------------------
+  // Last thing in the IIFE so every declaration above has run before
+  // setLevel(0) calls setResetMode(false) (which reads `let resetMode`).
+  buildLevelTabs();
+  setLevel(0);
 })();

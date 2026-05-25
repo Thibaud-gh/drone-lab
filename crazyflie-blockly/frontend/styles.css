@@ -375,6 +375,60 @@ body {
   background: var(--ink);
   color: var(--paper);
 }
+/* ---- Sim card caption + level tabs ------------------------------------ */
+
+.sim-caption {
+  position: absolute;
+  top: 18px;
+  left: 120px;
+  right: 60px;
+  z-index: 2;
+  margin: 0;
+  font-family: var(--font-hand);
+  font-size: 19px;
+  line-height: 1.1;
+  color: var(--ink);
+  opacity: 0.85;
+  pointer-events: none;
+  transform: rotate(-0.8deg);
+}
+
+.level-tabs {
+  position: absolute;
+  top: 28px;
+  right: -14px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.level-tab {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.02em;
+  width: 36px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--paper);
+  color: var(--ink-soft);
+  border: 2px solid var(--ink);
+  border-radius: 0 12px 12px 0;
+  border-left: 0;
+  cursor: pointer;
+  box-shadow: 2px 3px 0 rgba(26,42,64,0.4);
+  transition: transform 120ms ease, background 200ms, color 200ms;
+}
+.level-tab:nth-child(odd)  { transform: rotate(1.5deg); }
+.level-tab:nth-child(even) { transform: rotate(-1.2deg); }
+.level-tab:hover { background: #FBE9CF; color: var(--ink); }
+.level-tab.is-active {
+  background: var(--ink);
+  color: var(--paper);
+}
+
 .card--palette .card__tab-num { background: var(--logic); color: var(--ink); }
 .card--blocks  .card__tab-num { background: var(--flight); }
 .card--sim     .card__tab-num { background: var(--sensor); }

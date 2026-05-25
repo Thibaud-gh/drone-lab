@@ -9,6 +9,14 @@
 const PX_PER_CM = 3.2;             // canvas scale
 const FLOOR_Y_FRAC = 0.78;          // where "the ground" sits on the canvas (for shadow logic)
 
+// Drone "home" — where it starts a flight. Bottom-centre so the canvas
+// above shows the play area the kid is flying into.
+function droneHomeXY(canvas) {
+  const w = canvas._cssW || canvas.width;
+  const h = canvas._cssH || canvas.height;
+  return { x: w / 2, y: h - 70 };
+}
+
 class SimDrone {
   constructor(canvas, hudEls) {
     this.canvas = canvas;
@@ -23,10 +31,9 @@ class SimDrone {
   }
 
   reset() {
-    const w = this.canvas._cssW || this.canvas.width;
-    const h = this.canvas._cssH || this.canvas.height;
-    this.x = w / 2;
-    this.y = h / 2 + 30;
+    const home = droneHomeXY(this.canvas);
+    this.x = home.x;
+    this.y = home.y;
     this.heading = -Math.PI / 2; // facing up on the canvas
     this.height = 0;
     this.flying = false;
@@ -39,6 +46,11 @@ class SimDrone {
     this._setStatus('ready when you are', 'idle');
     this._updateHud();
     this._trail = [];
+  }
+
+  // Set the current level. Stored so _draw can render zones + scale bar.
+  setLevel(level) {
+    this._level = level;
   }
 
   stop() { this._stopped = true; }
@@ -187,6 +199,14 @@ class SimDrone {
     ctx.stroke();
     ctx.restore();
 
+    // level zones (target areas) — drawn under the trail so the trail
+    // remains readable as it crosses them
+    this._drawZones(ctx);
+
+    // a small ruler in the bottom-right corner — gives the kid a visual
+    // sense of "how far is 30cm" so she can estimate distances by eye
+    this._drawScaleBar(ctx);
+
     // trail — persists until drone.reset() clears it (cleared on next fly!
     // or when the kid presses reset). Capped at 2000 points upstream.
     if (this._trail.length > 1) {
@@ -212,6 +232,55 @@ class SimDrone {
 
     // height tape next to the drone (only when in the air)
     if (this.height > 1) this._drawHeightBadge(ctx);
+  }
+
+  _drawZones(ctx) {
+    if (!this._level || !this._level.zones?.length) return;
+    const home = droneHomeXY(this.canvas);
+    ctx.save();
+    for (const z of this._level.zones) {
+      const cx = home.x + (z.x_cm ?? 0) * PX_PER_CM;
+      const cy = home.y + (z.y_cm ?? 0) * PX_PER_CM;
+      const w  = (z.w_cm ?? 30) * PX_PER_CM;
+      const h  = (z.h_cm ?? 30) * PX_PER_CM;
+      const fill = z.color === 'green' ? 'rgba(127,168,119,0.32)' : 'rgba(127,168,119,0.32)';
+      const stroke = z.color === 'green' ? '#5C8657' : '#5C8657';
+      ctx.fillStyle = fill;
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 5]);
+      this._roundRect(ctx, cx - w/2, cy - h/2, w, h, 10);
+      ctx.fill();
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    ctx.restore();
+  }
+
+  _drawScaleBar(ctx) {
+    const cssW = this.canvas._cssW || this.canvas.width;
+    const cssH = this.canvas._cssH || this.canvas.height;
+    const len_cm = 30;
+    const len_px = len_cm * PX_PER_CM;
+    const x = cssW - len_px - 18;
+    const y = cssH - 22;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(26,42,64,0.7)';
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+    // hash marks on each end
+    ctx.beginPath();
+    ctx.moveTo(x, y - 5);             ctx.lineTo(x, y + 5);
+    ctx.moveTo(x + len_px, y - 5);    ctx.lineTo(x + len_px, y + 5);
+    ctx.moveTo(x, y);                 ctx.lineTo(x + len_px, y);
+    ctx.stroke();
+    // label
+    ctx.fillStyle = 'rgba(26,42,64,0.85)';
+    ctx.font = '500 11px "Lexend", system-ui, sans-serif';
+    ctx.textBaseline = 'top';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${len_cm} cm`, x + len_px / 2, y + 7);
+    ctx.restore();
   }
 
   _drawShadow(ctx) {

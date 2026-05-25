@@ -74,8 +74,10 @@
   // SimDrone's own animation methods are bypassed in real-drone mode —
   // bridge.js drives state directly.
   function applyStateToDrone(drone, msg, canvas) {
-    const cx = (canvas._cssW || canvas.width)  / 2;
-    const cy = (canvas._cssH || canvas.height) / 2 + 30;
+    // Drone "home" is bottom-centre, matching simulator.js droneHomeXY().
+    // Keep these two in sync.
+    const cx = (canvas._cssW || canvas.width) / 2;
+    const cy = (canvas._cssH || canvas.height) - 70;
     drone.x = cx + (msg.x_cm * PX_PER_CM_BRIDGE);
     drone.y = cy + (msg.y_cm * PX_PER_CM_BRIDGE);
     drone.height = msg.height_cm;
