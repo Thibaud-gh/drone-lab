@@ -379,9 +379,9 @@ body {
 
 .sim-caption {
   position: absolute;
-  top: 18px;
-  left: 120px;
-  right: 60px;
+  top: 4px;                /* roughly horizontal with the "watch it fly" tab */
+  left: 210px;             /* sits just to the right of the tab */
+  right: 56px;             /* don't run under the level tabs */
   z-index: 2;
   margin: 0;
   font-family: var(--font-hand);
@@ -390,6 +390,7 @@ body {
   color: var(--ink);
   opacity: 0.85;
   pointer-events: none;
+  text-align: left;
   transform: rotate(-0.8deg);
 }
 
