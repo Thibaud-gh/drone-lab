@@ -124,7 +124,24 @@
             <p class="workspace-hint__text">tap a block over there<br/>or drag it here</p>
             <p class="workspace-hint__sub">stack more to make a flight plan</p>
           </div>
-          <span class="trash-hint" aria-hidden="true">drag here<br/>to throw away</span>
+
+          <!-- Bigger custom trashcan. Blockly's built-in trashcan is hidden
+               visually (still functional as a safety net) and this overlay
+               sits on top with its own drag-end hit detection. -->
+          <div class="bigbin" id="bigbin" aria-hidden="true">
+            <svg class="bigbin__svg" viewBox="0 0 80 92">
+              <path class="bigbin__body"
+                    d="M12 26 L68 26 L62 84 a4 4 0 0 1 -4 4 L22 88 a4 4 0 0 1 -4 -4 Z"
+                    fill="#FFFBEE" stroke="#1A2A40" stroke-width="2.6" stroke-linejoin="round"/>
+              <path d="M27 40 L27 76 M40 40 L40 76 M53 40 L53 76"
+                    stroke="#1A2A40" stroke-width="1.8" stroke-linecap="round" fill="none"/>
+              <g class="bigbin__lid">
+                <path d="M6 22 L74 22 L74 16 L52 16 L50 8 L30 8 L28 16 L6 16 Z"
+                      fill="#FFFBEE" stroke="#1A2A40" stroke-width="2.6" stroke-linejoin="round"/>
+              </g>
+            </svg>
+            <span class="bigbin__hint">drag here<br/>to throw away</span>
+          </div>
         </div>
       </section>
 
