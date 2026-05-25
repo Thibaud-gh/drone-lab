@@ -230,6 +230,10 @@ body {
 }
 .btn--go:hover { background: var(--go-hot); }
 
+/* "fly!" button flips to "reset" after a pretend flight completes */
+.btn--go.btn--reset { background: var(--logic); color: var(--ink); }
+.btn--go.btn--reset:hover { background: #F1CF87; }
+
 .btn--stop {
   background: var(--stop);
   color: var(--paper);

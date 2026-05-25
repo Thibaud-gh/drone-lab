@@ -330,11 +330,27 @@
   // ----- Run / Stop ------------------------------------------------------
   const runBtn  = document.getElementById('run-btn');
   const stopBtn = document.getElementById('stop-btn');
+  const runLabel = runBtn.querySelector('span');
 
   let running = false;
+  let resetMode = false;  // in pretend mode, after a flight completes, the
+                          // run button becomes "reset" until the kid clears
+                          // the canvas. Real-drone mode never enters this.
+
+  function setResetMode(on) {
+    resetMode = on;
+    runBtn.classList.toggle('btn--reset', on);
+    runLabel.textContent = on ? 'reset' : 'fly!';
+  }
 
   runBtn.addEventListener('click', async () => {
     if (running) return;
+
+    if (resetMode) {
+      drone.reset();
+      setResetMode(false);
+      return;
+    }
 
     if (currentMode === 'real') {
       // Send Python to the bridge. State + status come back over WS and
@@ -381,6 +397,7 @@
       running = false;
       runBtn.disabled = false;
       runBtn.classList.remove('is-running');
+      setResetMode(true);   // pretend-mode flight done → button offers reset
     }
   });
 
@@ -401,6 +418,8 @@
     workspace.clear();
     refreshCode();
     updateHintVisibility();
+    drone.reset();
+    setResetMode(false);
   });
 
   // ----- Mode toggle -----------------------------------------------------
@@ -413,7 +432,8 @@
       // Land is an emergency-stop for the real drone; meaningless in sim
       // where every run starts from scratch and the user can't crash.
       stopBtn.disabled = (currentMode !== 'real');
-      drone.reset();   // fresh state when switching modes
+      drone.reset();
+      setResetMode(false);
     });
   });
 
