@@ -33,6 +33,9 @@ class SimDrone {
     this._rotorSpeed = 0;
     this._stopped = false;
     this._lastError = null;
+    // Each reset bumps the generation; in-flight tweens read this and bail
+    // without writing state. This is how mid-flight reset works cleanly.
+    this._gen = (this._gen ?? 0) + 1;
     this._setStatus('ready when you are', 'idle');
     this._updateHud();
     this._trail = [];
@@ -54,6 +57,7 @@ class SimDrone {
 
   async takeoff() {
     if (this._stopped || this._lastError) return;
+    const gen = this._gen;
     if (this.flying) {
       this._fail("already in the air — no need to take off again!");
       return;
@@ -61,23 +65,27 @@ class SimDrone {
     this.flying = true;
     this._setStatus('taking off', 'flying');
     await this._tween(this.height, 30, 800, (v) => this.height = v, () => this._rotorSpeed = 30);
+    if (gen !== this._gen) return;   // reset happened mid-tween
     this._rotorSpeed = 20;
   }
 
   async land() {
     if (this._stopped || this._lastError) return;
+    const gen = this._gen;
     if (!this.flying) {
       this._fail("can't land — the drone is already on the ground!");
       return;
     }
     this._setStatus('landing', 'flying');
     await this._tween(this.height, 0, 900, (v) => this.height = v);
+    if (gen !== this._gen) return;
     this.flying = false;
     this._rotorSpeed = 0;
   }
 
   async forward(cm) {
     if (this._stopped || this._lastError) return;
+    const gen = this._gen;
     if (!this.flying) {
       this._fail("can't fly forward — take off first!");
       return;
@@ -89,15 +97,19 @@ class SimDrone {
     const duration = 30 + cm * 28;
     this._rotorSpeed = 36;
     await this._tween(0, 1, duration, (t) => {
+      if (gen !== this._gen) return;   // reset mid-tween — don't keep extending the trail
       this.x = startX + dx * t;
       this.y = startY + dy * t;
-      if (Math.random() < 0.5) this._trail.push({ x: this.x, y: this.y, t: performance.now() });
+      if (Math.random() < 0.5) this._trail.push({ x: this.x, y: this.y });
+      if (this._trail.length > 2000) this._trail.shift();
     });
+    if (gen !== this._gen) return;
     this._rotorSpeed = 20;
   }
 
   async up(cm) {
     if (this._stopped || this._lastError) return;
+    const gen = this._gen;
     if (!this.flying) {
       this._fail("can't climb — take off first!");
       return;
@@ -105,6 +117,7 @@ class SimDrone {
     this._setStatus(`climbing ${cm} cm`, 'flying');
     this._rotorSpeed = 32;
     await this._tween(this.height, this.height + cm, 30 + cm * 26, (v) => this.height = v);
+    if (gen !== this._gen) return;
     this._rotorSpeed = 20;
   }
 
@@ -115,8 +128,14 @@ class SimDrone {
   _tween(from, to, duration, onUpdate, onStart) {
     return new Promise((resolve) => {
       if (onStart) onStart();
+      const startGen = this._gen;
       const start = performance.now();
       const step = (now) => {
+        // Reset during a tween — leave state alone, the caller's reset()
+        // already wrote the target visual state.
+        if (this._gen !== startGen) { resolve(); return; }
+        // Stop button — snap to the target so the in-flight move completes
+        // instantly (preserves existing stop UX).
         if (this._stopped) { onUpdate(to); resolve(); return; }
         const t = Math.min(1, (now - start) / duration);
         const eased = t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t + 2, 2) / 2; // easeInOutQuad
@@ -168,24 +187,20 @@ class SimDrone {
     ctx.stroke();
     ctx.restore();
 
-    // trail (recent path) — fades over ~1.4s
-    const tNow = performance.now();
-    this._trail = this._trail.filter((p) => tNow - p.t < 1400);
+    // trail — persists until drone.reset() clears it (cleared on next fly!
+    // or when the kid presses reset). Capped at 2000 points upstream.
     if (this._trail.length > 1) {
       ctx.save();
       ctx.lineWidth = 2.5;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
+      ctx.strokeStyle = 'rgba(231,111,81,0.55)';
+      ctx.beginPath();
+      ctx.moveTo(this._trail[0].x, this._trail[0].y);
       for (let i = 1; i < this._trail.length; i++) {
-        const a = this._trail[i - 1];
-        const b = this._trail[i];
-        const age = (tNow - b.t) / 1400;
-        ctx.strokeStyle = `rgba(231,111,81,${0.55 * (1 - age)})`;
-        ctx.beginPath();
-        ctx.moveTo(a.x, a.y);
-        ctx.lineTo(b.x, b.y);
-        ctx.stroke();
+        ctx.lineTo(this._trail[i].x, this._trail[i].y);
       }
+      ctx.stroke();
       ctx.restore();
     }
 

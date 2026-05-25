@@ -202,7 +202,11 @@
   hud.height.firstChild.textContent = '0';
 
   fitCanvas(canvas);
-  new ResizeObserver(() => { fitCanvas(canvas); drone.reset(); refreshCode(); })
+  // Only refit the canvas on resize — don't drone.reset() here, that wipes
+  // the drone state mid-flight (incl. the trail) every time the layout
+  // shifts. The drone's existing position renders fine even at the new
+  // canvas size.
+  new ResizeObserver(() => { fitCanvas(canvas); })
     .observe(canvas.parentElement);
 
   const drone = new SimDrone(canvas, hud);
@@ -332,9 +336,8 @@
   const stopBtn = document.getElementById('stop-btn');
   const runLabel = runBtn.querySelector('span');
 
-  let running = false;
-  let resetMode = false;  // in pretend mode, after a flight completes, the
-                          // run button becomes "reset" until the kid clears
+  let resetMode = false;  // when true, the run button reads "reset" and a
+                          // click cancels the in-flight program + resets
                           // the canvas. Real-drone mode never enters this.
 
   function setResetMode(on) {
@@ -344,17 +347,16 @@
   }
 
   runBtn.addEventListener('click', async () => {
-    if (running) return;
-
     if (resetMode) {
+      // Mid-flight cancel: drone.reset() bumps the generation counter, so
+      // any in-flight tween bails on its next frame without writing more
+      // state. Trail clears as part of reset.
       drone.reset();
       setResetMode(false);
       return;
     }
 
     if (currentMode === 'real') {
-      // Send Python to the bridge. State + status come back over WS and
-      // are applied to the canvas drone by the message handler above.
       const pyCode = pyGen.workspaceToCode(workspace);
       if (!pyCode.trim()) {
         flash(hud.statusBox, 'add some blocks first!');
@@ -371,16 +373,18 @@
       flash(hud.statusBox, 'add some blocks first!');
       return;
     }
-    running = true;
-    runBtn.classList.add('is-running');
-    runBtn.disabled = true;
 
     drone.reset();
+    setResetMode(true);   // flip immediately so the kid can abort any time
+    const flightGen = drone._gen;
     await wait(120);
 
     try {
       const fn = new Function('drone', `return (async () => {\n${code}\n})();`);
       await fn(drone);
+      // If the kid pressed reset mid-flight, drone._gen has moved on.
+      // Reset already set status to "ready when you are"; don't overwrite.
+      if (drone._gen !== flightGen) return;
       if (drone._lastError) {
         // _setStatus was already called in _fail(); leave it on screen.
       } else if (drone._stopped) {
@@ -392,12 +396,9 @@
       }
     } catch (err) {
       console.error(err);
-      drone._setStatus("hmm — that didn't work. let's try again!", 'stopped');
-    } finally {
-      running = false;
-      runBtn.disabled = false;
-      runBtn.classList.remove('is-running');
-      setResetMode(true);   // pretend-mode flight done → button offers reset
+      if (drone._gen === flightGen) {
+        drone._setStatus("hmm — that didn't work. let's try again!", 'stopped');
+      }
     }
   });
 
