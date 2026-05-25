@@ -14,7 +14,7 @@ python3 -m http.server 5173 --directory frontend
 cd bridge && uv sync && uv run python server.py
 ```
 
-For now the frontend runs the simulator entirely in the browser. The bridge is stubbed; wiring it to a real (or [CrazySim-simulated](../SETUP.md)) Crazyflie is the next slice.
+For now the frontend runs the simulator entirely in the browser. The bridge is stubbed; wiring it to a real Crazyflie (via cflib over Crazyradio 2.0) is the next slice — see [../SETUP.md](../SETUP.md).
 
 ## Layout
 
@@ -26,4 +26,4 @@ examples/   # Saved block programs (one per curriculum project)
 
 ## First time on a new machine?
 
-See [../SETUP.md](../SETUP.md) for the macOS install path, including CrazySim (Bitcraze's software-in-the-loop simulator) so you can develop the bridge without owning a real drone.
+See [../SETUP.md](../SETUP.md) for the macOS install path.
