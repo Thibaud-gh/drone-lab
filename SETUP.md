@@ -10,10 +10,10 @@ This is the one-shot install path from a fresh macOS machine to a working dev en
 
 ```sh
 xcode-select --install                              # C/C++ toolchain
-brew install cmake uv git                            # build system, Python env manager, git (if missing)
+brew install cmake uv git pkg-config                 # build system, Python env manager, git, cmake helper
 ```
 
-- `cmake` builds the SITL firmware
+- `cmake` + `pkg-config` build the SITL firmware (pkg-config is needed by CrazySim's CMakeLists)
 - [`uv`](https://github.com/astral-sh/uv) manages the bridge's Python environment
 
 ---
@@ -37,10 +37,13 @@ After this you should have:
 
 ---
 
-## 2. Build the SITL firmware
+## 2. Build the SITL firmware — **not viable natively on macOS**
 
-This compiles the actual Crazyflie firmware as a native executable that runs on your laptop instead of being flashed to a real STM32. Same code path the real drone runs — that's why testing against this is meaningful.
+> The Crazyflie firmware uses GCC/ELF-only `__attribute__((section(...)))` for its parameter and log registration, plus a custom `log_param_linker.ld` script that only works with GNU `ld`. Apple Clang on macOS uses Mach-O object files which require a different section-attribute syntax (`__SEGMENT,__section`) and a completely different linker. Porting this would take days and diverge us from upstream.
+>
+> **Use one of the workarounds in section 2.5 instead.**
 
+For reference, on **Linux** the build is:
 ```sh
 cd ~/projects/CrazySim/crazyflie-firmware
 mkdir -p sitl_make/build && cd $_
@@ -48,7 +51,19 @@ cmake ..
 make all -j8
 ```
 
-> **macOS rough-edge log:** the firmware is primarily tested on Linux. Record any `make` failures + workarounds in the [Known issues](#known-issues) section below.
+---
+
+## 2.5. Workarounds on macOS — pick one
+
+| Option | Fidelity | Setup cost | Visual feedback |
+|---|---|---|---|
+| **A. Docker (headless CrazySim)** | High — real firmware, real cflib | ~30 min | None (cflib log telemetry only) |
+| **B. OrbStack / UTM Linux VM** | High — real firmware + MuJoCo viewer | ~1 hour | Yes, GUI passthrough |
+| **C. Skip simulator, MockDrone in Python** | Low — wrapper-level only, not real firmware | minutes | None |
+
+Recommendation: **B (OrbStack)** if you want to see a virtual drone fly; **A (Docker)** if you just want cflib parity; **C** if neither is worth the time right now.
+
+Concrete steps for each option will land in this file as we pick one and walk through it.
 
 ---
 
@@ -120,6 +135,7 @@ CrazySim URI: `udp://127.0.0.1:19850`. Real drone URI: `radio://0/80/2M/E7E7E7E7
 
 ## Known issues
 
-> Add macOS-specific patches and workarounds here as we hit them.
+> macOS-specific patches and workarounds.
 
-- *(none yet)*
+- **`cmake ..` fails with `Could NOT find PkgConfig`.** Fix: `brew install pkg-config`. (Now in step 0 prereqs.)
+- **`make all` fails with `argument to 'section' attribute is not valid for this target: mach-o section specifier requires a segment and section separated by a comma`.** Root cause: Crazyflie firmware uses GCC ELF-only `__attribute__((section(".param.NAME")))` macros (`PARAM_GROUP_START`, `LOG_GROUP_START`, etc.) + a custom GNU-ld linker script (`sitl_make/log_param_linker.ld`). Mach-O / Apple Clang require different syntax. **Not patchable in a reasonable time** — use the workarounds in section 2.5.
