@@ -629,6 +629,11 @@ body {
   color: var(--ink-soft);
 }
 
+/* battery chip is meaningless in pretend mode (no actual battery to drain).
+   Kept in the markup so we can surface a real reading from cflib once the
+   bridge streams it. */
+body[data-mode="sim"] .sim__chip--battery { display: none; }
+
 .sim__status {
   position: absolute;
   bottom: 14px;

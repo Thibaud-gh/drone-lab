@@ -424,12 +424,14 @@
   });
 
   // ----- Mode toggle -----------------------------------------------------
+  document.body.dataset.mode = 'sim';   // initial mode; CSS uses this
   document.querySelectorAll('.mode-toggle__btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       if (btn.disabled) return;
       document.querySelectorAll('.mode-toggle__btn').forEach((b) => b.classList.remove('is-active'));
       btn.classList.add('is-active');
       currentMode = btn.dataset.mode;
+      document.body.dataset.mode = currentMode;
       // Land is an emergency-stop for the real drone; meaningless in sim
       // where every run starts from scratch and the user can't crash.
       stopBtn.disabled = (currentMode !== 'real');
