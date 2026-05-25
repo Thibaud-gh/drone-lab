@@ -63,7 +63,8 @@
           <button class="mode-toggle__btn is-active" data-mode="sim" type="button">
             <span class="mode-toggle__dot"></span>pretend
           </button>
-          <button class="mode-toggle__btn" data-mode="real" type="button" disabled>
+          <button class="mode-toggle__btn" data-mode="real" type="button" disabled
+                  title="start the bridge (uv run python server.py) to enable">
             <span class="mode-toggle__dot"></span>real drone
           </button>
         </div>
@@ -207,6 +208,7 @@
     <script src="blocks.js"></script>
     <script src="generator.js"></script>
     <script src="simulator.js"></script>
+    <script src="bridge.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

@@ -293,6 +293,40 @@
     drawerToggle.setAttribute('aria-expanded', open ? 'false' : 'true');
   });
 
+  // ----- Bridge (real-drone) wiring --------------------------------------
+  // Auto-connect on load. If the bridge isn't running yet we keep retrying
+  // quietly; when it appears, the "real drone" toggle becomes clickable.
+  const realBtn  = document.querySelector('.mode-toggle__btn[data-mode="real"]');
+  const simBtn   = document.querySelector('.mode-toggle__btn[data-mode="sim"]');
+  let currentMode = 'sim';
+  const bridge = new BridgeClient();
+
+  bridge.on('connect', () => {
+    realBtn.disabled = false;
+    realBtn.title = 'fly the program against the bridge';
+  });
+  bridge.on('disconnect', () => {
+    realBtn.disabled = true;
+    realBtn.title = 'start the bridge (uv run python server.py) to enable';
+    if (currentMode === 'real') {
+      simBtn.click();   // fall back to pretend if the bridge dies mid-session
+    }
+  });
+  bridge.on('message', (msg) => {
+    if (currentMode !== 'real') return;
+    if (msg.op === 'state') {
+      applyStateToDrone(drone, msg, canvas);
+    } else if (msg.op === 'status') {
+      drone._setStatus(msg.text, msg.mode || 'flying');
+    } else if (msg.op === 'error') {
+      drone._lastError = msg.message;
+      drone._setStatus(msg.message, 'stopped');
+    } else if (msg.op === 'done') {
+      drone._setStatus('flight complete ✨', 'idle');
+    }
+  });
+  bridge.connect();
+
   // ----- Run / Stop ------------------------------------------------------
   const runBtn  = document.getElementById('run-btn');
   const stopBtn = document.getElementById('stop-btn');
@@ -301,6 +335,21 @@
 
   runBtn.addEventListener('click', async () => {
     if (running) return;
+
+    if (currentMode === 'real') {
+      // Send Python to the bridge. State + status come back over WS and
+      // are applied to the canvas drone by the message handler above.
+      const pyCode = pyGen.workspaceToCode(workspace);
+      if (!pyCode.trim()) {
+        flash(hud.statusBox, 'add some blocks first!');
+        return;
+      }
+      drone.reset();
+      bridge.send({ op: 'run', code: pyCode });
+      return;
+    }
+
+    // pretend mode — run the JS-generated code against the in-browser sim
     const code = jsGen.workspaceToCode(workspace);
     if (!code.trim()) {
       flash(hud.statusBox, 'add some blocks first!');
@@ -316,9 +365,6 @@
     try {
       const fn = new Function('drone', `return (async () => {\n${code}\n})();`);
       await fn(drone);
-      // Status precedence: in-flight error > user-stopped > clean finish.
-      // Errors and stops are persistent (set by the sim/stop handler with red
-      // dot); only the clean-finish case sets a transient celebration message.
       if (drone._lastError) {
         // _setStatus was already called in _fail(); leave it on screen.
       } else if (drone._stopped) {
@@ -339,8 +385,13 @@
   });
 
   stopBtn.addEventListener('click', () => {
-    drone.stop();
-    drone._setStatus('stopped — give it a moment', 'stopped');
+    if (currentMode === 'real') {
+      bridge.send({ op: 'stop' });
+      drone._setStatus('stopped — give it a moment', 'stopped');
+    } else {
+      drone.stop();
+      drone._setStatus('stopped — give it a moment', 'stopped');
+    }
   });
 
   // ----- Start over: clear all blocks ------------------------------------
@@ -358,9 +409,11 @@
       if (btn.disabled) return;
       document.querySelectorAll('.mode-toggle__btn').forEach((b) => b.classList.remove('is-active'));
       btn.classList.add('is-active');
+      currentMode = btn.dataset.mode;
       // Land is an emergency-stop for the real drone; meaningless in sim
       // where every run starts from scratch and the user can't crash.
-      stopBtn.disabled = (btn.dataset.mode !== 'real');
+      stopBtn.disabled = (currentMode !== 'real');
+      drone.reset();   // fresh state when switching modes
     });
   });
 

@@ -1,13 +1,24 @@
-"""Drone Lab — WebSocket bridge (skeleton).
+"""Drone Lab — WebSocket bridge.
 
-Receives generated Python from the browser, executes it against
-the active Drone driver (Sim or Crazyflie). This file is a stub —
-the frontend doesn't talk to it yet. We wire it up in the next
-slice once the in-browser sim is validated end-to-end.
+Receives generated Python from the browser, executes it against the
+active Drone driver (MockDrone today, CrazyflieDrone once hardware
+arrives). Streams state updates back to the browser canvas as the
+drone moves.
+
+Protocol
+--------
+Browser → Bridge:
+    {"op": "run", "code": "drone.takeoff()\\n..."}
+    {"op": "stop"}
+
+Bridge → Browser:
+    {"op": "state",  x_cm, y_cm, height_cm, heading, flying, rotor_speed}
+    {"op": "status", "text": "flying forward 30 cm", "mode": "flying"}
+    {"op": "error",  "message": "can't fly forward — take off first!"}
+    {"op": "done"}
 
 Run:
-    pip install -r requirements.txt
-    python server.py
+    uv run python server.py
 """
 
 from __future__ import annotations
@@ -15,10 +26,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 
 import websockets
 
-from drone import SimDrone
+from drone import MockDrone
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(message)s")
 log = logging.getLogger("bridge")
@@ -27,19 +39,47 @@ HOST = "localhost"
 PORT = 8765
 
 
-async def run_program(code: str, drone: SimDrone) -> None:
-    """Execute generated Python in a constrained namespace.
+# The generated Python looks synchronous to keep it kid-readable (matches
+# cflib's MotionCommander API). The driver methods are async so we can
+# stream state between steps — inject ``await`` before each ``drone.*``
+# call right before exec.
+_DRONE_CALL = re.compile(r"^(\s*)(drone\.\w+\()")
 
-    SECURITY NOTE: exec() with arbitrary input is unsafe in general.
-    Here it's gated to the user's own machine and the local frontend,
-    but we'll harden this (AST whitelist of calls + module-free
-    globals) before we hand the laptop to anyone other than Thibaud.
+
+def _to_async(code: str) -> str:
+    """Prepend ``await`` to lines calling ``drone.<method>(...)``."""
+    out: list[str] = []
+    for line in code.splitlines():
+        m = _DRONE_CALL.match(line)
+        if m:
+            indent, call = m.group(1), m.group(2)
+            out.append(f"{indent}await {call}{line[m.end():]}")
+        else:
+            out.append(line)
+    return "\n".join(out)
+
+
+async def _run_program(code: str, drone: MockDrone) -> None:
+    """exec() the user's Python in a constrained namespace.
+
+    SECURITY NOTE: exec() of arbitrary input is unsafe in general. This
+    bridge is bound to ``localhost`` and only this project's frontend
+    talks to it. We'll harden (AST whitelist) before this ships anywhere
+    that isn't Thibaud's laptop.
     """
-    ns = {"drone": drone, "__builtins__": {"range": range, "print": print}}
-    # Wrap user code in an async function so it can `await` drone calls
+    transformed = _to_async(code)
+    # Wrap in an async function so ``await`` is legal.
     wrapper = "async def __program__():\n" + "\n".join(
-        ("    " + line) if line.strip() else line for line in code.splitlines()
+        ("    " + ln) if ln.strip() else ln for ln in transformed.splitlines()
     )
+    # If the user wrote no statements (only comments), Python complains
+    # about an empty function body — add a pass line for safety.
+    if "drone." not in transformed:
+        wrapper += "\n    pass\n"
+    ns: dict = {"drone": drone, "__builtins__": {
+        "range": range, "len": len, "abs": abs, "min": min, "max": max,
+        "True": True, "False": False, "None": None, "print": print,
+    }}
     exec(wrapper, ns)
     await ns["__program__"]()
 
@@ -48,27 +88,55 @@ async def handle(ws: websockets.WebSocketServerProtocol) -> None:
     log.info("client connected")
 
     async def send(msg: dict) -> None:
-        await ws.send(json.dumps(msg))
+        try:
+            await ws.send(json.dumps(msg))
+        except websockets.ConnectionClosed:
+            pass
 
-    drone = SimDrone(send)
+    drone = MockDrone(send)
+    program_task: asyncio.Task | None = None
 
     try:
         async for raw in ws:
-            msg = json.loads(raw)
-            if msg.get("op") == "run":
+            try:
+                msg = json.loads(raw)
+            except json.JSONDecodeError:
+                log.warning("non-JSON message dropped: %r", raw[:80])
+                continue
+
+            op = msg.get("op")
+
+            if op == "run":
+                if program_task and not program_task.done():
+                    log.info("ignoring run — program already in flight")
+                    continue
+                # Fresh drone state for each run
+                drone = MockDrone(send)
                 code = msg.get("code", "")
                 log.info("running %d-line program", len(code.splitlines()))
-                try:
-                    await run_program(code, drone)
-                    await send({"op": "done"})
-                except Exception as exc:           # noqa: BLE001
-                    log.exception("program failed")
-                    await send({"op": "error", "message": str(exc)})
-            elif msg.get("op") == "stop":
+
+                async def _go(code: str = code, drone: MockDrone = drone) -> None:
+                    try:
+                        await _run_program(code, drone)
+                        if drone.last_error is None and not drone.stopped:
+                            await send({"op": "done"})
+                    except Exception as exc:           # noqa: BLE001
+                        log.exception("program failed")
+                        await send({"op": "error", "message": str(exc)})
+
+                program_task = asyncio.create_task(_go())
+
+            elif op == "stop":
                 log.info("stop requested")
-                # TODO: interrupt the in-flight program (CancelScope)
+                drone.stopped = True
+                if program_task and not program_task.done():
+                    program_task.cancel()
+                await send({"op": "status", "text": "stopped", "mode": "stopped"})
+
     finally:
         log.info("client disconnected")
+        if program_task and not program_task.done():
+            program_task.cancel()
 
 
 async def main() -> None:
