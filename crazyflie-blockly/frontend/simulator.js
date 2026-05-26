@@ -98,11 +98,13 @@ class SimDrone {
       const inX = Math.abs(this.x_cm - (z.x_cm ?? 0)) <= hw;
       const inY = Math.abs(this.y_cm - (z.y_cm ?? 0)) <= hh;
       if (!inX || !inY) continue;
-      if (z.kind === 'wall' && this.height < (z.over_height_cm ?? 60)) {
+      // Strict: at the wall's height (or below) → touches its top; at the
+      // beam's height (or above) → touches its underside. Either is a crash.
+      if (z.kind === 'wall' && this.height <= (z.over_height_cm ?? 30)) {
         this._fail('ouch — you needed to fly higher over the wall!');
         return true;
       }
-      if (z.kind === 'beam' && this.height > (z.under_height_cm ?? 30)) {
+      if (z.kind === 'beam' && this.height >= (z.under_height_cm ?? 60)) {
         this._fail('ouch — you needed to fly lower under the beam!');
         return true;
       }
@@ -468,59 +470,68 @@ class SimDrone {
     ctx.restore();
   }
 
-  // Wall body = a solid brick rectangle standing on its footprint.
-  // Extends from the lifted top of the wall down to the front edge of
-  // the footprint. Brick stagger + a `▲ N` label tells the kid how
-  // high to fly to clear it.
+  // Wall body = a brick slab at the wall's height, mirroring the beam
+  // visually (same thickness, just a different texture + label). The
+  // dashed footprint on the floor (drawn in the floor pass) plus
+  // dashed "post" lines from the footprint sides up to the slab
+  // anchor it to the ground.
   _drawWall(ctx, cx, cy, w, h, z) {
-    const heightCm = z.over_height_cm ?? 60;
+    const heightCm = z.over_height_cm ?? 30;
     const liftPx   = heightCm * ALTITUDE_PX_PER_CM * this._zoom;
     const units    = +(heightCm / CM_PER_UNIT).toFixed(1);
+    const ySlabMid = cy - liftPx;
 
-    const x0  = cx - w/2;
-    const x1  = cx + w/2;
-    const yBottom = cy + h/2;            // front edge of footprint
-    const yTop    = cy - h/2 - liftPx;   // top of the wall on canvas
-    const bodyH   = yBottom - yTop;
+    // dashed "posts" from footprint side edges up to the slab sides —
+    // says "this wall stands on the floor and reaches up to here"
+    ctx.save();
+    ctx.strokeStyle = 'rgba(92,58,36,0.55)';
+    ctx.lineWidth = 1.2;
+    ctx.setLineDash([3, 4]);
+    ctx.beginPath();
+    ctx.moveTo(cx - w/2, cy);
+    ctx.lineTo(cx - w/2, ySlabMid);
+    ctx.moveTo(cx + w/2, cy);
+    ctx.lineTo(cx + w/2, ySlabMid);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
 
-    // body fill + outline
+    // brick slab at altitude
     ctx.save();
     ctx.fillStyle = '#A0704D';
     ctx.strokeStyle = '#5C3A24';
     ctx.lineWidth = 2;
-    this._roundRect(ctx, x0, yTop, w, bodyH, 5);
+    this._roundRect(ctx, cx - w/2, ySlabMid - h/2, w, h, 4);
     ctx.fill();
     ctx.stroke();
-
-    // staggered brick pattern, clipped to the body
+    // staggered brick pattern, clipped to the slab
     ctx.save();
     ctx.beginPath();
-    this._roundRect(ctx, x0, yTop, w, bodyH, 5);
+    this._roundRect(ctx, cx - w/2, ySlabMid - h/2, w, h, 4);
     ctx.clip();
-    ctx.strokeStyle = 'rgba(92,58,36,0.55)';
+    ctx.strokeStyle = 'rgba(92,58,36,0.6)';
     ctx.lineWidth = 1.2;
     const brickH = Math.max(8, 9 * this._zoom);
     const brickW = brickH * 2.5;
     let row = 0;
-    for (let y = yBottom - brickH; y > yTop; y -= brickH, row++) {
+    for (let y = ySlabMid + h/2 - brickH; y > ySlabMid - h/2; y -= brickH, row++) {
       ctx.beginPath();
-      ctx.moveTo(x0, y); ctx.lineTo(x1, y);
+      ctx.moveTo(cx - w/2, y); ctx.lineTo(cx + w/2, y);
       ctx.stroke();
-      const startX = (row % 2 === 0) ? x0 + brickW / 2 : x0;
-      for (let x = startX; x < x1; x += brickW) {
+      const startX = (row % 2 === 0) ? cx - w/2 + brickW / 2 : cx - w/2;
+      for (let x = startX; x < cx + w/2; x += brickW) {
         ctx.beginPath();
-        ctx.moveTo(x, y); ctx.lineTo(x, Math.min(y + brickH, yBottom));
+        ctx.moveTo(x, y); ctx.lineTo(x, Math.min(y + brickH, ySlabMid + h/2));
         ctx.stroke();
       }
     }
     ctx.restore();
-
-    // ▲ N label centered on the body
+    // ▲ N label centered on the slab
     ctx.fillStyle = '#FFFBEE';
-    ctx.font = `700 ${Math.round(16 * this._zoom)}px "Lexend", system-ui, sans-serif`;
+    ctx.font = `700 ${Math.round(14 * this._zoom)}px "Lexend", system-ui, sans-serif`;
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'center';
-    ctx.fillText(`▲ ${units}`, cx, (yTop + yBottom) / 2);
+    ctx.fillText(`▲ ${units}`, cx, ySlabMid);
     ctx.restore();
   }
 
