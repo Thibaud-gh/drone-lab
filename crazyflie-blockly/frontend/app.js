@@ -255,13 +255,8 @@
       case 'land_in_zone': {
         const z = level.zones[level.win.zone];
         if (!z) return { won: true };
-        const home = { x: canvas._cssW / 2, y: canvas._cssH - 70 };
-        const zx = home.x + (z.x_cm ?? 0) * 3.2;
-        const zy = home.y + (z.y_cm ?? 0) * 3.2;
-        const hw = (z.w_cm ?? 30) * 3.2 / 2;
-        const hh = (z.h_cm ?? 30) * 3.2 / 2;
-        const inX = Math.abs(d.x - zx) <= hw;
-        const inY = Math.abs(d.y - zy) <= hh;
+        const inX = Math.abs(d.x_cm - (z.x_cm ?? 0)) <= (z.w_cm ?? 30) / 2;
+        const inY = Math.abs(d.y_cm - (z.y_cm ?? 0)) <= (z.h_cm ?? 30) / 2;
         return inX && inY
           ? { won: true }
           : { won: false, reason: 'you landed in the wrong area' };
@@ -540,6 +535,19 @@
       }
     }, 2400);
   }
+
+  // ----- Canvas zoom -----------------------------------------------------
+  // Two sources of truth that have to stay in sync: drone._zoom (drives
+  // cm→px conversions in simulator.js) and --canvas-zoom (drives the
+  // scale-bar width in styles.css). applyCanvasZoom() updates both.
+  const simEl = document.querySelector('.sim');
+  function applyCanvasZoom(z) {
+    drone.setZoom(z);
+    simEl.style.setProperty('--canvas-zoom', drone._zoom);
+  }
+  document.getElementById('zoom-in') .addEventListener('click', () => applyCanvasZoom(drone._zoom * 1.25));
+  document.getElementById('zoom-out').addEventListener('click', () => applyCanvasZoom(drone._zoom / 1.25));
+  applyCanvasZoom(1.0);
 
   // ----- Boot ------------------------------------------------------------
   // Last thing in the IIFE so every declaration above has run before

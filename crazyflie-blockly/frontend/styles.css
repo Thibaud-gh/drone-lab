@@ -724,7 +724,25 @@ body[data-mode="sim"] .sim__chip--battery { display: none; }
   text-align: center;
   color: rgba(26,42,64,0.7);
 }
-.sim__scale-bar { display: block; }
+.sim__scale-bar {
+  /* 30 cm at the current canvas zoom — width tracks --canvas-zoom set
+     from app.js whenever the kid hits +/-. Default 1.0 = 96 px. */
+  width: calc(96px * var(--canvas-zoom, 1));
+  height: 10px;
+  position: relative;
+  margin: 0 auto;
+  border-left:  2px solid currentColor;
+  border-right: 2px solid currentColor;
+}
+.sim__scale-bar::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  border-top: 2px solid currentColor;
+  transform: translateY(-1px);
+}
 .sim__scale-label {
   display: block;
   font-family: var(--font-body);
@@ -733,6 +751,38 @@ body[data-mode="sim"] .sim__chip--battery { display: none; }
   color: var(--ink-soft);
   margin-top: 2px;
 }
+
+/* Zoom controls — small map-style +/- in the top-left of the canvas */
+.sim__zoom {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sim__zoom-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1.5px solid var(--ink);
+  background: rgba(255,251,238,0.92);
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 0 rgba(26,42,64,0.35);
+  transition: transform 100ms ease, background 200ms;
+}
+.sim__zoom-btn:hover  { background: #FBE9CF; }
+.sim__zoom-btn:active { transform: translateY(1px); box-shadow: 0 1px 0 rgba(26,42,64,0.35); }
+.sim__zoom-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .sim__status.is-flying  .sim__status-dot { background: var(--flight); box-shadow: 0 0 0 3px rgba(231,111,81,0.25); }
 .sim__status.is-stopped .sim__status-dot { background: var(--stop);   box-shadow: 0 0 0 3px rgba(208,69,67,0.25);  }
 

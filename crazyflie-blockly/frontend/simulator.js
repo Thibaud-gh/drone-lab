@@ -4,17 +4,23 @@
    CrazyflieDrone will, so the generated code is identical
    in both modes. Animations are awaitable so the generated
    JS (await drone.forward(30)) reads sequentially.
+
+   State is stored in **cm relative to home**. Drawing
+   converts cm→px at render time using the current canvas
+   dimensions × the current zoom factor — so browser zoom
+   and the in-canvas +/- zoom buttons both just work without
+   touching stored state.
    ========================================================= */
 
-const PX_PER_CM = 3.2;             // canvas scale
-const FLOOR_Y_FRAC = 0.78;          // where "the ground" sits on the canvas (for shadow logic)
+const PX_PER_CM = 3.2;             // base canvas scale at zoom 1.0
+const HOME_BOTTOM_INSET = 70;       // px from canvas bottom edge where the drone sits at home
 
-// Drone "home" — where it starts a flight. Bottom-centre so the canvas
-// above shows the play area the kid is flying into.
+// Drone "home" — bottom-centre of the canvas in pixels. Cached on each
+// _draw call since it depends on canvas size.
 function droneHomeXY(canvas) {
   const w = canvas._cssW || canvas.width;
   const h = canvas._cssH || canvas.height;
-  return { x: w / 2, y: h - 70 };
+  return { x: w / 2, y: h - HOME_BOTTOM_INSET };
 }
 
 class SimDrone {
@@ -22,6 +28,7 @@ class SimDrone {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.hud = hudEls; // { height, status, statusText, statusBox }
+    this._zoom = 1.0;
     this.reset();
 
     this._lastT = performance.now();
@@ -31,11 +38,10 @@ class SimDrone {
   }
 
   reset() {
-    const home = droneHomeXY(this.canvas);
-    this.x = home.x;
-    this.y = home.y;
-    this.heading = -Math.PI / 2; // facing up on the canvas
-    this.height = 0;
+    this.x_cm = 0;                  // cm relative to home
+    this.y_cm = 0;
+    this.heading = -Math.PI / 2;    // facing "north" on the canvas
+    this.height = 0;                // cm — name preserved for HUD code
     this.flying = false;
     this._rotorSpeed = 0;
     this._stopped = false;
@@ -48,9 +54,16 @@ class SimDrone {
     this._trail = [];
   }
 
-  // Set the current level. Stored so _draw can render zones + scale bar.
+  // Set the current level. Stored so _draw can render zones.
   setLevel(level) {
     this._level = level;
+  }
+
+  // Set the canvas zoom factor. 1.0 is the base scale; higher = bigger
+  // distances on the canvas. Trail/zones/grid scale with this; the drone
+  // marker stays a constant pixel size (map-marker convention).
+  setZoom(z) {
+    this._zoom = Math.max(0.4, Math.min(2.5, z));
   }
 
   stop() { this._stopped = true; }
@@ -61,6 +74,15 @@ class SimDrone {
   _fail(msg) {
     this._lastError = msg;
     this._setStatus(msg, 'stopped');
+  }
+
+  // ---- cm → pixel helpers --------------------------------------------
+
+  _pxX(x_cm) {
+    return droneHomeXY(this.canvas).x + x_cm * PX_PER_CM * this._zoom;
+  }
+  _pxY(y_cm) {
+    return droneHomeXY(this.canvas).y + y_cm * PX_PER_CM * this._zoom;
   }
 
   // -----------------------------------------------------
@@ -77,7 +99,7 @@ class SimDrone {
     this.flying = true;
     this._setStatus('taking off', 'flying');
     await this._tween(this.height, 30, 800, (v) => this.height = v, () => this._rotorSpeed = 30);
-    if (gen !== this._gen) return;   // reset happened mid-tween
+    if (gen !== this._gen) return;
     this._rotorSpeed = 20;
   }
 
@@ -103,16 +125,16 @@ class SimDrone {
       return;
     }
     this._setStatus(`flying forward ${cm} cm`, 'flying');
-    const startX = this.x, startY = this.y;
-    const dx = Math.cos(this.heading) * cm * PX_PER_CM;
-    const dy = Math.sin(this.heading) * cm * PX_PER_CM;
+    const startXcm = this.x_cm, startYcm = this.y_cm;
+    const dx_cm = Math.cos(this.heading) * cm;
+    const dy_cm = Math.sin(this.heading) * cm;
     const duration = 30 + cm * 28;
     this._rotorSpeed = 36;
     await this._tween(0, 1, duration, (t) => {
-      if (gen !== this._gen) return;   // reset mid-tween — don't keep extending the trail
-      this.x = startX + dx * t;
-      this.y = startY + dy * t;
-      if (Math.random() < 0.5) this._trail.push({ x: this.x, y: this.y });
+      if (gen !== this._gen) return;
+      this.x_cm = startXcm + dx_cm * t;
+      this.y_cm = startYcm + dy_cm * t;
+      if (Math.random() < 0.5) this._trail.push({ x_cm: this.x_cm, y_cm: this.y_cm });
       if (this._trail.length > 2000) this._trail.shift();
     });
     if (gen !== this._gen) return;
@@ -143,14 +165,10 @@ class SimDrone {
       const startGen = this._gen;
       const start = performance.now();
       const step = (now) => {
-        // Reset during a tween — leave state alone, the caller's reset()
-        // already wrote the target visual state.
         if (this._gen !== startGen) { resolve(); return; }
-        // Stop button — snap to the target so the in-flight move completes
-        // instantly (preserves existing stop UX).
         if (this._stopped) { onUpdate(to); resolve(); return; }
         const t = Math.min(1, (now - start) / duration);
-        const eased = t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t + 2, 2) / 2; // easeInOutQuad
+        const eased = t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t + 2, 2) / 2;
         onUpdate(from + (to - from) * eased);
         if (t < 1) requestAnimationFrame(step);
         else resolve();
@@ -188,25 +206,23 @@ class SimDrone {
 
     ctx.clearRect(0, 0, w, h);
 
-    // soft grid (very faint)
+    // grid — every 30cm (same as the scale bar), so it scales with zoom
     ctx.save();
     ctx.strokeStyle = 'rgba(26,42,64,0.07)';
     ctx.lineWidth = 1;
-    const step = 36;
+    const step = 30 * PX_PER_CM * this._zoom;
+    const home = droneHomeXY(this.canvas);
     ctx.beginPath();
-    for (let x = step; x < w; x += step) { ctx.moveTo(x, 0); ctx.lineTo(x, h); }
-    for (let y = step; y < h; y += step) { ctx.moveTo(0, y); ctx.lineTo(w, y); }
+    for (let x = home.x % step; x < w; x += step) { ctx.moveTo(x, 0); ctx.lineTo(x, h); }
+    for (let y = home.y % step; y < h; y += step) { ctx.moveTo(0, y); ctx.lineTo(w, y); }
     ctx.stroke();
     ctx.restore();
 
     // level zones (target areas) — drawn under the trail so the trail
-    // remains readable as it crosses them. The 30cm reference scale lives
-    // as an HTML overlay (.sim__scale) so it can't get clipped by the
-    // canvas's rounded corner.
+    // remains readable as it crosses them
     this._drawZones(ctx);
 
-    // trail — persists until drone.reset() clears it (cleared on next fly!
-    // or when the kid presses reset). Capped at 2000 points upstream.
+    // trail — persists until drone.reset() clears it
     if (this._trail.length > 1) {
       ctx.save();
       ctx.lineWidth = 2.5;
@@ -214,37 +230,32 @@ class SimDrone {
       ctx.lineJoin = 'round';
       ctx.strokeStyle = 'rgba(231,111,81,0.55)';
       ctx.beginPath();
-      ctx.moveTo(this._trail[0].x, this._trail[0].y);
+      ctx.moveTo(this._pxX(this._trail[0].x_cm), this._pxY(this._trail[0].y_cm));
       for (let i = 1; i < this._trail.length; i++) {
-        ctx.lineTo(this._trail[i].x, this._trail[i].y);
+        ctx.lineTo(this._pxX(this._trail[i].x_cm), this._pxY(this._trail[i].y_cm));
       }
       ctx.stroke();
       ctx.restore();
     }
 
-    // shadow — sized & blurred by altitude
-    this._drawShadow(ctx);
-
-    // drone
-    this._drawDrone(ctx);
-
-    // height tape next to the drone (only when in the air)
-    if (this.height > 1) this._drawHeightBadge(ctx);
+    // shadow + drone — drawn at the pixel position derived from cm state
+    const px = this._pxX(this.x_cm);
+    const py = this._pxY(this.y_cm);
+    this._drawShadow(ctx, px, py);
+    this._drawDrone(ctx, px, py);
+    if (this.height > 1) this._drawHeightBadge(ctx, px, py);
   }
 
   _drawZones(ctx) {
     if (!this._level || !this._level.zones?.length) return;
-    const home = droneHomeXY(this.canvas);
     ctx.save();
     for (const z of this._level.zones) {
-      const cx = home.x + (z.x_cm ?? 0) * PX_PER_CM;
-      const cy = home.y + (z.y_cm ?? 0) * PX_PER_CM;
-      const w  = (z.w_cm ?? 30) * PX_PER_CM;
-      const h  = (z.h_cm ?? 30) * PX_PER_CM;
-      const fill = z.color === 'green' ? 'rgba(127,168,119,0.32)' : 'rgba(127,168,119,0.32)';
-      const stroke = z.color === 'green' ? '#5C8657' : '#5C8657';
-      ctx.fillStyle = fill;
-      ctx.strokeStyle = stroke;
+      const cx = this._pxX(z.x_cm ?? 0);
+      const cy = this._pxY(z.y_cm ?? 0);
+      const w  = (z.w_cm ?? 30) * PX_PER_CM * this._zoom;
+      const h  = (z.h_cm ?? 30) * PX_PER_CM * this._zoom;
+      ctx.fillStyle = 'rgba(127,168,119,0.32)';
+      ctx.strokeStyle = '#5C8657';
       ctx.lineWidth = 2;
       ctx.setLineDash([6, 5]);
       this._roundRect(ctx, cx - w/2, cy - h/2, w, h, 10);
@@ -255,13 +266,13 @@ class SimDrone {
     ctx.restore();
   }
 
-  _drawShadow(ctx) {
+  _drawShadow(ctx, px, py) {
     const altRatio = Math.min(1, this.height / 80);
     const offset = 6 + altRatio * 18;
     const rx = 22 + altRatio * 18;
     const ry = 9  + altRatio * 7;
     ctx.save();
-    ctx.translate(this.x + offset * 0.4, this.y + offset);
+    ctx.translate(px + offset * 0.4, py + offset);
     ctx.filter = `blur(${4 + altRatio * 6}px)`;
     ctx.fillStyle = `rgba(26,42,64,${0.42 - altRatio * 0.22})`;
     ctx.beginPath();
@@ -270,18 +281,20 @@ class SimDrone {
     ctx.restore();
   }
 
-  _drawDrone(ctx) {
+  _drawDrone(ctx, px, py) {
+    // The drone marker is a fixed pixel size (map-marker convention) — it
+    // doesn't scale with canvas zoom. Altitude still gives a small bump
+    // for perspective.
     const altRatio = Math.min(1, this.height / 80);
-    const scale = 1 + altRatio * 0.18; // a touch bigger when higher (perspective hint)
-    const r = 16 * scale;       // body radius
-    const arm = 26 * scale;     // arm length
-    const propR = 11 * scale;   // prop radius
+    const scale = 1 + altRatio * 0.18;
+    const r = 16 * scale;
+    const arm = 26 * scale;
+    const propR = 11 * scale;
 
     ctx.save();
-    ctx.translate(this.x, this.y);
+    ctx.translate(px, py);
     ctx.rotate(this.heading + Math.PI / 2);
 
-    // arms (X-frame)
     ctx.lineCap = 'round';
     ctx.lineWidth = 4 * scale;
     ctx.strokeStyle = '#1A2A40';
@@ -293,7 +306,6 @@ class SimDrone {
     }
     ctx.stroke();
 
-    // props — translucent disc + spinning tri-blade
     for (const a of [Math.PI/4, 3*Math.PI/4, -Math.PI/4, -3*Math.PI/4]) {
       const cx = Math.cos(a) * arm;
       const cy = Math.sin(a) * arm;
@@ -301,13 +313,11 @@ class SimDrone {
       ctx.save();
       ctx.translate(cx, cy);
 
-      // motor hub
       ctx.fillStyle = '#1A2A40';
       ctx.beginPath();
       ctx.arc(0, 0, 4 * scale, 0, Math.PI * 2);
       ctx.fill();
 
-      // spinning prop blur
       ctx.rotate(this._rotorAngle * (this._rotorSpeed > 0 ? 1 : 0));
       const speedBlur = Math.min(0.55, this._rotorSpeed / 60);
       ctx.fillStyle = `rgba(255,251,238,${0.25 + speedBlur})`;
@@ -318,7 +328,6 @@ class SimDrone {
       ctx.lineWidth = 1.2 * scale;
       ctx.stroke();
 
-      // blade hint (only visible at low speed)
       if (this._rotorSpeed < 10) {
         ctx.strokeStyle = '#1A2A40';
         ctx.lineWidth = 1.4 * scale;
@@ -330,7 +339,6 @@ class SimDrone {
       ctx.restore();
     }
 
-    // body
     ctx.fillStyle = '#E76F51';
     ctx.strokeStyle = '#1A2A40';
     ctx.lineWidth = 2.2 * scale;
@@ -339,13 +347,11 @@ class SimDrone {
     ctx.fill();
     ctx.stroke();
 
-    // "eye" — front-facing marker
     ctx.fillStyle = '#1A2A40';
     ctx.beginPath();
     ctx.arc(0, -r * 0.45, r * 0.18, 0, Math.PI * 2);
     ctx.fill();
 
-    // front triangle (so kid knows facing direction)
     ctx.fillStyle = '#F0A93B';
     ctx.beginPath();
     ctx.moveTo(0, -r - 5 * scale);
@@ -360,14 +366,14 @@ class SimDrone {
     ctx.restore();
   }
 
-  _drawHeightBadge(ctx) {
+  _drawHeightBadge(ctx, px, py) {
     const label = `↑ ${Math.round(this.height)}cm`;
     ctx.save();
     ctx.font = '500 12px "Lexend", system-ui, sans-serif';
-    const padX = 8, padY = 4;
+    const padX = 8;
     const w = ctx.measureText(label).width + padX * 2;
-    const x = this.x + 32;
-    const y = this.y - 8;
+    const x = px + 32;
+    const y = py - 8;
     ctx.fillStyle = 'rgba(255,251,238,0.92)';
     ctx.strokeStyle = '#1A2A40';
     ctx.lineWidth = 1.5;

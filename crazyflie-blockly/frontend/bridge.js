@@ -8,7 +8,6 @@
 
 (function () {
   const BRIDGE_URL = 'ws://localhost:8765';
-  const PX_PER_CM_BRIDGE = 3.2;   // matches simulator.js — keep in sync
 
   class BridgeClient {
     constructor() {
@@ -73,16 +72,14 @@
   // SimDrone instance so the canvas renders identically in both modes.
   // SimDrone's own animation methods are bypassed in real-drone mode —
   // bridge.js drives state directly.
-  function applyStateToDrone(drone, msg, canvas) {
-    // Drone "home" is bottom-centre, matching simulator.js droneHomeXY().
-    // Keep these two in sync.
-    const cx = (canvas._cssW || canvas.width) / 2;
-    const cy = (canvas._cssH || canvas.height) - 70;
-    drone.x = cx + (msg.x_cm * PX_PER_CM_BRIDGE);
-    drone.y = cy + (msg.y_cm * PX_PER_CM_BRIDGE);
+  function applyStateToDrone(drone, msg /*, canvas */) {
+    // SimDrone stores state in cm relative to home — bridge messages
+    // already use that frame, so this is now a straight copy.
+    drone.x_cm   = msg.x_cm;
+    drone.y_cm   = msg.y_cm;
     drone.height = msg.height_cm;
     drone.heading = msg.heading;
-    drone.flying = !!msg.flying;
+    drone.flying  = !!msg.flying;
     drone._rotorSpeed = msg.rotor_speed ?? drone._rotorSpeed;
     if (typeof msg.status === 'string') {
       drone._setStatus(msg.status, drone.flying ? 'flying' : 'idle');
