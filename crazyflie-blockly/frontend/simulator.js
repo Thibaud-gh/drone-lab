@@ -225,7 +225,7 @@ class SimDrone {
     // trail — persists until drone.reset() clears it
     if (this._trail.length > 1) {
       ctx.save();
-      ctx.lineWidth = 2.5;
+      ctx.lineWidth = 2.5 * this._zoom;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       ctx.strokeStyle = 'rgba(231,111,81,0.55)';
@@ -268,12 +268,13 @@ class SimDrone {
 
   _drawShadow(ctx, px, py) {
     const altRatio = Math.min(1, this.height / 80);
-    const offset = 6 + altRatio * 18;
-    const rx = 22 + altRatio * 18;
-    const ry = 9  + altRatio * 7;
+    const z = this._zoom;
+    const offset = (6 + altRatio * 18) * z;
+    const rx = (22 + altRatio * 18) * z;
+    const ry = (9  + altRatio * 7)  * z;
     ctx.save();
     ctx.translate(px + offset * 0.4, py + offset);
-    ctx.filter = `blur(${4 + altRatio * 6}px)`;
+    ctx.filter = `blur(${(4 + altRatio * 6) * z}px)`;
     ctx.fillStyle = `rgba(26,42,64,${0.42 - altRatio * 0.22})`;
     ctx.beginPath();
     ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
@@ -282,11 +283,11 @@ class SimDrone {
   }
 
   _drawDrone(ctx, px, py) {
-    // The drone marker is a fixed pixel size (map-marker convention) — it
-    // doesn't scale with canvas zoom. Altitude still gives a small bump
-    // for perspective.
+    // The drone scales with the canvas zoom — same convention as everything
+    // else on the canvas (grid, trail, zones, shadow). Altitude still gives
+    // a small extra bump for perspective.
     const altRatio = Math.min(1, this.height / 80);
-    const scale = 1 + altRatio * 0.18;
+    const scale = (1 + altRatio * 0.18) * this._zoom;
     const r = 16 * scale;
     const arm = 26 * scale;
     const propR = 11 * scale;
@@ -367,22 +368,23 @@ class SimDrone {
   }
 
   _drawHeightBadge(ctx, px, py) {
+    const z = this._zoom;
     const label = `↑ ${Math.round(this.height)}cm`;
     ctx.save();
-    ctx.font = '500 12px "Lexend", system-ui, sans-serif';
-    const padX = 8;
+    ctx.font = `500 ${Math.round(12 * z)}px "Lexend", system-ui, sans-serif`;
+    const padX = 8 * z;
     const w = ctx.measureText(label).width + padX * 2;
-    const x = px + 32;
-    const y = py - 8;
+    const x = px + 32 * z;
+    const y = py - 8 * z;
     ctx.fillStyle = 'rgba(255,251,238,0.92)';
     ctx.strokeStyle = '#1A2A40';
     ctx.lineWidth = 1.5;
-    this._roundRect(ctx, x, y - 12, w, 18, 9);
+    this._roundRect(ctx, x, y - 12 * z, w, 18 * z, 9 * z);
     ctx.fill();
     ctx.stroke();
     ctx.fillStyle = '#1A2A40';
     ctx.textBaseline = 'middle';
-    ctx.fillText(label, x + padX, y - 3);
+    ctx.fillText(label, x + padX, y - 3 * z);
     ctx.restore();
   }
 
