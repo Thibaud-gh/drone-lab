@@ -226,12 +226,20 @@
     LEVELS.forEach((lvl) => {
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = 'level-tab';
+      btn.className = 'level-tab' + (lvl.id === 'sandbox' ? ' level-tab--sandbox' : '');
       btn.dataset.level = String(lvl.id);
-      btn.textContent = String(lvl.id);
+      btn.textContent = lvl.id === 'sandbox' ? '★' : String(lvl.id);
       btn.title = lvl.caption;
       btn.addEventListener('click', () => setLevel(lvl.id));
       tabsEl.appendChild(btn);
+    });
+  }
+
+  // Hide palette tiles that aren't in the current level's allow-list.
+  function applyPalette(lvl) {
+    const allowed = new Set(lvl.palette || PALETTE.map(p => p.type));
+    palette.querySelectorAll('.tile').forEach(t => {
+      t.style.display = allowed.has(t.dataset.block) ? '' : 'none';
     });
   }
 
@@ -243,9 +251,16 @@
     drone.setLevel(lvl);
     drone.reset();
     setResetMode(false);
-    // mark active tab
+    applyPalette(lvl);
+    // Fresh workspace per level — avoids leftover blocks the new palette
+    // wouldn't allow the kid to add back.
+    workspace.clear();
+    setLastActive(null);
+    refreshCode();
+    updateHintVisibility();
+    // mark active tab — compare as strings so 'sandbox' matches
     tabsEl.querySelectorAll('.level-tab').forEach(b => {
-      b.classList.toggle('is-active', Number(b.dataset.level) === id);
+      b.classList.toggle('is-active', b.dataset.level === String(id));
     });
   }
 
@@ -557,5 +572,5 @@
   // Last thing in the IIFE so every declaration above has run before
   // setLevel(0) calls setResetMode(false) (which reads `let resetMode`).
   buildLevelTabs();
-  setLevel(0);
+  setLevel(1);
 })();

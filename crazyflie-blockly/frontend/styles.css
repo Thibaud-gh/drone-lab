@@ -430,6 +430,21 @@ body {
   color: var(--paper);
 }
 
+/* Sandbox tab — sits below the numbered levels with a visible gap,
+   and uses the marigold accent so it reads as "free play, not a
+   challenge". */
+.level-tab--sandbox {
+  margin-top: 22px;
+  background: var(--logic);
+  color: var(--ink);
+  font-size: 18px;
+}
+.level-tab--sandbox:hover    { background: #F1CF87; }
+.level-tab--sandbox.is-active {
+  background: var(--ink);
+  color: var(--logic);
+}
+
 .card--palette .card__tab-num { background: var(--logic); color: var(--ink); }
 .card--blocks  .card__tab-num { background: var(--flight); }
 .card--sim     .card__tab-num { background: var(--sensor); }
