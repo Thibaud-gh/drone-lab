@@ -47,6 +47,9 @@ class Drone(ABC):
     async def up(self, units: float) -> None: ...
 
     @abstractmethod
+    async def down(self, units: float) -> None: ...
+
+    @abstractmethod
     async def turn_left(self) -> None: ...
 
     @abstractmethod
@@ -139,6 +142,19 @@ class MockDrone(Drone):
         label = f"{units:g} unit" if units == 1 else f"{units:g} units"
         await self._status(f"climbing {label}")
         await self._tween(30 + cm * PER_CM_UP_MS, self._climb_by(cm), rotor=32)
+        self.rotor_speed = 20
+
+    async def down(self, units: float) -> None:
+        if self._aborted():
+            return
+        if not self.flying:
+            await self._fail("can't go down — take off first!")
+            return
+        cm = units * CM_PER_UNIT
+        target = max(0.0, self.height_cm - cm)
+        label = f"{units:g} unit" if units == 1 else f"{units:g} units"
+        await self._status(f"going down {label}")
+        await self._tween(30 + cm * PER_CM_UP_MS, self._climb_to(target), rotor=24)
         self.rotor_speed = 20
 
     async def turn_left(self) -> None:
@@ -254,5 +270,6 @@ class CrazyflieDrone(Drone):
     async def land(self) -> None: ...
     async def forward(self, units: float) -> None: ...
     async def up(self, units: float) -> None: ...
+    async def down(self, units: float) -> None: ...
     async def turn_left(self) -> None: ...
     async def turn_right(self) -> None: ...

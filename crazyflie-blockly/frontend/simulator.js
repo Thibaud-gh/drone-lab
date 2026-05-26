@@ -81,6 +81,30 @@ class SimDrone {
     this._setStatus(msg, 'stopped');
   }
 
+  // Collision against wall/beam zones, evaluated against the drone's
+  // current (x_cm, y_cm, height). Returns true if a crash was triggered
+  // so the caller can short-circuit the rest of its work.
+  _checkCrash() {
+    if (this._lastError) return true;
+    if (!this._level || !this._level.zones?.length) return false;
+    for (const z of this._level.zones) {
+      const hw = (z.w_cm ?? 30) / 2;
+      const hh = (z.h_cm ?? 30) / 2;
+      const inX = Math.abs(this.x_cm - (z.x_cm ?? 0)) <= hw;
+      const inY = Math.abs(this.y_cm - (z.y_cm ?? 0)) <= hh;
+      if (!inX || !inY) continue;
+      if (z.kind === 'wall' && this.height < (z.over_height_cm ?? 60)) {
+        this._fail('ouch — you needed to fly higher over the wall!');
+        return true;
+      }
+      if (z.kind === 'beam' && this.height > (z.under_height_cm ?? 30)) {
+        this._fail('ouch — you needed to fly lower under the beam!');
+        return true;
+      }
+    }
+    return false;
+  }
+
   // ---- cm → pixel helpers --------------------------------------------
 
   _pxX(x_cm) {
@@ -103,7 +127,10 @@ class SimDrone {
     }
     this.flying = true;
     this._setStatus('taking off', 'flying');
-    await this._tween(this.height, 30, 800, (v) => this.height = v, () => this._rotorSpeed = 30);
+    await this._tween(this.height, 30, 800, (v) => {
+      this.height = v;
+      this._checkCrash();
+    }, () => this._rotorSpeed = 30);
     if (gen !== this._gen) return;
     this._rotorSpeed = 20;
   }
@@ -116,7 +143,10 @@ class SimDrone {
       return;
     }
     this._setStatus('landing', 'flying');
-    await this._tween(this.height, 0, 900, (v) => this.height = v);
+    await this._tween(this.height, 0, 900, (v) => {
+      this.height = v;
+      this._checkCrash();
+    });
     if (gen !== this._gen) return;
     this.flying = false;
     this._rotorSpeed = 0;
@@ -140,6 +170,7 @@ class SimDrone {
       if (gen !== this._gen) return;
       this.x_cm = startXcm + dx_cm * t;
       this.y_cm = startYcm + dy_cm * t;
+      if (this._checkCrash()) return;
       if (Math.random() < 0.5) this._trail.push({ x_cm: this.x_cm, y_cm: this.y_cm });
       if (this._trail.length > 2000) this._trail.shift();
     });
@@ -157,7 +188,29 @@ class SimDrone {
     const cm = units * CM_PER_UNIT;
     this._setStatus(`climbing ${pluralUnits(units)}`, 'flying');
     this._rotorSpeed = 32;
-    await this._tween(this.height, this.height + cm, 30 + cm * 26, (v) => this.height = v);
+    await this._tween(this.height, this.height + cm, 30 + cm * 26, (v) => {
+      this.height = v;
+      this._checkCrash();
+    });
+    if (gen !== this._gen) return;
+    this._rotorSpeed = 20;
+  }
+
+  async down(units) {
+    if (this._stopped || this._lastError) return;
+    const gen = this._gen;
+    if (!this.flying) {
+      this._fail("can't go down — take off first!");
+      return;
+    }
+    const cm = units * CM_PER_UNIT;
+    const target = Math.max(0, this.height - cm);
+    this._setStatus(`going down ${pluralUnits(units)}`, 'flying');
+    this._rotorSpeed = 24;
+    await this._tween(this.height, target, 30 + cm * 26, (v) => {
+      this.height = v;
+      this._checkCrash();
+    });
     if (gen !== this._gen) return;
     this._rotorSpeed = 20;
   }
@@ -212,9 +265,11 @@ class SimDrone {
       const step = (now) => {
         if (this._gen !== startGen) { resolve(); return; }
         if (this._stopped) { onUpdate(to); resolve(); return; }
+        if (this._lastError) { resolve(); return; }    // crash detected
         const t = Math.min(1, (now - start) / duration);
         const eased = t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t + 2, 2) / 2;
         onUpdate(from + (to - from) * eased);
+        if (this._lastError) { resolve(); return; }    // onUpdate just set it
         if (t < 1) requestAnimationFrame(step);
         else resolve();
       };
@@ -315,21 +370,92 @@ class SimDrone {
 
   _drawZones(ctx) {
     if (!this._level || !this._level.zones?.length) return;
-    ctx.save();
     for (const z of this._level.zones) {
       const cx = this._pxX(z.x_cm ?? 0);
       const cy = this._pxY(z.y_cm ?? 0);
       const w  = (z.w_cm ?? 30) * PX_PER_CM * this._zoom;
       const h  = (z.h_cm ?? 30) * PX_PER_CM * this._zoom;
-      ctx.fillStyle = 'rgba(127,168,119,0.32)';
-      ctx.strokeStyle = '#5C8657';
-      ctx.lineWidth = 2;
-      ctx.setLineDash([6, 5]);
-      this._roundRect(ctx, cx - w/2, cy - h/2, w, h, 10);
-      ctx.fill();
-      ctx.stroke();
-      ctx.setLineDash([]);
+      const kind = z.kind || 'target';
+      if      (kind === 'wall') this._drawWall(ctx, cx, cy, w, h);
+      else if (kind === 'beam') this._drawBeam(ctx, cx, cy, w, h);
+      else                       this._drawTarget(ctx, cx, cy, w, h, z);
     }
+  }
+
+  _drawTarget(ctx, cx, cy, w, h /*, z */) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(127,168,119,0.32)';
+    ctx.strokeStyle = '#5C8657';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 5]);
+    this._roundRect(ctx, cx - w/2, cy - h/2, w, h, 10);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Wall = solid brick-textured slab on the floor. Big ⬆ in the centre
+  // says "fly over me". Drone must reach `over_height_cm` (default 60)
+  // before entering this footprint.
+  _drawWall(ctx, cx, cy, w, h) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(180,118,84,0.92)';
+    ctx.strokeStyle = '#5C3A24';
+    ctx.lineWidth = 2;
+    this._roundRect(ctx, cx - w/2, cy - h/2, w, h, 4);
+    ctx.fill();
+    ctx.stroke();
+    // brick rows
+    ctx.strokeStyle = 'rgba(92,58,36,0.45)';
+    ctx.lineWidth = 1;
+    const brickH = Math.max(5, 6 * this._zoom);
+    ctx.beginPath();
+    for (let y = cy - h/2 + brickH; y < cy + h/2 - 1; y += brickH) {
+      ctx.moveTo(cx - w/2, y);
+      ctx.lineTo(cx + w/2, y);
+    }
+    ctx.stroke();
+    // ⬆ icon
+    ctx.fillStyle = '#FFFBEE';
+    ctx.font = `700 ${Math.round(22 * this._zoom)}px "Lexend", system-ui, sans-serif`;
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center';
+    ctx.fillText('▲', cx, cy);
+    ctx.restore();
+  }
+
+  // Beam = ceiling/overhead obstacle. Diagonal hazard-stripe pattern with
+  // a big ⬇ in the centre. Drone must stay at or below `under_height_cm`
+  // (default 30) while in this footprint.
+  _drawBeam(ctx, cx, cy, w, h) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(240,169,59,0.45)';
+    ctx.strokeStyle = '#1A2A40';
+    ctx.lineWidth = 2;
+    this._roundRect(ctx, cx - w/2, cy - h/2, w, h, 4);
+    ctx.fill();
+    ctx.stroke();
+    // hazard stripes
+    ctx.save();
+    ctx.beginPath();
+    this._roundRect(ctx, cx - w/2, cy - h/2, w, h, 4);
+    ctx.clip();
+    ctx.strokeStyle = 'rgba(26,42,64,0.32)';
+    ctx.lineWidth = Math.max(4, 6 * this._zoom);
+    const step = Math.max(12, 18 * this._zoom);
+    for (let x = cx - w/2 - h; x < cx + w/2 + h; x += step) {
+      ctx.beginPath();
+      ctx.moveTo(x, cy + h/2);
+      ctx.lineTo(x + h, cy - h/2);
+      ctx.stroke();
+    }
+    ctx.restore();
+    // ⬇ icon
+    ctx.fillStyle = '#1A2A40';
+    ctx.font = `700 ${Math.round(22 * this._zoom)}px "Lexend", system-ui, sans-serif`;
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center';
+    ctx.fillText('▼', cx, cy);
     ctx.restore();
   }
 

@@ -29,6 +29,12 @@
       <path d="M9 13 L16 6 L23 13" />
     </g></svg>`);
 
+  const ICON_DOWN = icon(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+    <g fill="none" stroke="#FFFBEE" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M16 5 L16 25" />
+      <path d="M9 19 L16 26 L23 19" />
+    </g></svg>`);
+
   const ICON_LAND = icon(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
     <g fill="none" stroke="#FFFBEE" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
       <path d="M16 4 L16 20" />
@@ -82,6 +88,18 @@
       nextStatement: null,
       style: 'flight_blocks',
       tooltip: 'climb up by this many units',
+    },
+    {
+      type: 'fly_down',
+      message0: '%1 fly down %2',
+      args0: [
+        { type: 'field_image', src: ICON_DOWN, width: 22, height: 22, alt: 'down' },
+        { type: 'field_number', name: 'DISTANCE', value: 1, min: 1, max: 6, precision: 1 },
+      ],
+      previousStatement: null,
+      nextStatement: null,
+      style: 'flight_blocks',
+      tooltip: 'descend by this many units',
     },
     {
       type: 'turn_left',

@@ -23,6 +23,10 @@
     const n = block.getFieldValue('DISTANCE');
     return `drone.up(${n})\n`;
   };
+  py.forBlock['fly_down'] = (block) => {
+    const n = block.getFieldValue('DISTANCE');
+    return `drone.down(${n})\n`;
+  };
 
   // Tell the Python generator to emit a comment header
   py.init = (function (orig) {
@@ -47,5 +51,9 @@
   js.forBlock['fly_up'] = (block) => {
     const n = block.getFieldValue('DISTANCE');
     return `await drone.up(${n});\n`;
+  };
+  js.forBlock['fly_down'] = (block) => {
+    const n = block.getFieldValue('DISTANCE');
+    return `await drone.down(${n});\n`;
   };
 })();
