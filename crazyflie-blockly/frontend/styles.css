@@ -397,6 +397,7 @@ body {
 .level-tabs {
   position: absolute;
   top: 28px;
+  bottom: 22px;
   right: -14px;
   z-index: 3;
   display: flex;
@@ -430,11 +431,11 @@ body {
   color: var(--paper);
 }
 
-/* Sandbox tab — sits below the numbered levels with a visible gap,
-   and uses the marigold accent so it reads as "free play, not a
-   challenge". */
+/* Sandbox tab — anchored to the bottom of the tab column (via
+   margin-top:auto in the flex container) and marigold-tinted so it
+   reads as "free play, not a challenge". */
 .level-tab--sandbox {
-  margin-top: 22px;
+  margin-top: auto;
   background: var(--logic);
   color: var(--ink);
   font-size: 18px;
