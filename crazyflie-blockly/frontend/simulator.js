@@ -15,6 +15,7 @@
 const PX_PER_CM = 3.2;             // base canvas scale at zoom 1.0
 const CM_PER_UNIT = 30;             // 1 unit (kid-facing) = 30 cm in the world
 const HOME_BOTTOM_INSET = 70;       // px from canvas bottom edge where the drone sits at home
+const ALTITUDE_PX_PER_CM = 52 / 90; // shared between drone-lift and obstacle perspective
 
 function pluralUnits(n) {
   return n === 1 ? '1 unit' : `${n} units`;
@@ -344,8 +345,10 @@ class SimDrone {
     // This is the perspective cue that says "it's hovering, not driving".
     const px        = this._pxX(this.x_cm);
     const py_ground = this._pxY(this.y_cm);
-    const liftAlt   = Math.min(1, this.height / 90);
-    const lift      = liftAlt * 52 * this._zoom;
+    // Same altitude-to-px factor obstacles use, so the drone visually
+    // clears a wall when its height >= wall.over_height_cm and is below
+    // the beam when its height <= beam.under_height_cm.
+    const lift      = this.height * ALTITUDE_PX_PER_CM * this._zoom;
     const py_drone  = py_ground - lift;
 
     this._drawShadow(ctx, px, py_ground);
@@ -376,8 +379,8 @@ class SimDrone {
       const w  = (z.w_cm ?? 30) * PX_PER_CM * this._zoom;
       const h  = (z.h_cm ?? 30) * PX_PER_CM * this._zoom;
       const kind = z.kind || 'target';
-      if      (kind === 'wall') this._drawWall(ctx, cx, cy, w, h);
-      else if (kind === 'beam') this._drawBeam(ctx, cx, cy, w, h);
+      if      (kind === 'wall') this._drawWall(ctx, cx, cy, w, h, z);
+      else if (kind === 'beam') this._drawBeam(ctx, cx, cy, w, h, z);
       else                       this._drawTarget(ctx, cx, cy, w, h, z);
     }
   }
@@ -394,68 +397,127 @@ class SimDrone {
     ctx.restore();
   }
 
-  // Wall = solid brick-textured slab on the floor. Big ⬆ in the centre
-  // says "fly over me". Drone must reach `over_height_cm` (default 60)
-  // before entering this footprint.
-  _drawWall(ctx, cx, cy, w, h) {
+  // Wall = a box rising out of the floor. Cabinet projection: the
+  // footprint stays at its world position (faint dashed outline), and
+  // the wall's top face is drawn offset up + slightly left, with the
+  // left + front side faces filled in. Same "altitude → vertical lift
+  // on the canvas" rule as the drone uses, so the kid reads them with
+  // the same instinct.
+  _drawWall(ctx, cx, cy, w, h, z) {
+    const heightCm = z.over_height_cm ?? 60;
+    const liftPx   = heightCm * ALTITUDE_PX_PER_CM * this._zoom;
+    const dx = -6 * this._zoom;
+    const dy = -liftPx;
+
+    // footprint outline — "this is where the wall stands on the floor"
     ctx.save();
-    ctx.fillStyle = 'rgba(180,118,84,0.92)';
+    ctx.strokeStyle = 'rgba(26,42,64,0.32)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 4]);
+    this._roundRect(ctx, cx - w/2, cy - h/2, w, h, 3);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+
+    // side faces (darker brick), drawn before the top so it overlaps
+    ctx.save();
+    ctx.fillStyle = '#915F40';
+    ctx.strokeStyle = '#5C3A24';
+    ctx.lineWidth = 1.5;
+    // left face
+    ctx.beginPath();
+    ctx.moveTo(cx - w/2,     cy - h/2);
+    ctx.lineTo(cx - w/2,     cy + h/2);
+    ctx.lineTo(cx - w/2 + dx, cy + h/2 + dy);
+    ctx.lineTo(cx - w/2 + dx, cy - h/2 + dy);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    // front face (canvas-bottom of wall)
+    ctx.beginPath();
+    ctx.moveTo(cx - w/2,     cy + h/2);
+    ctx.lineTo(cx + w/2,     cy + h/2);
+    ctx.lineTo(cx + w/2 + dx, cy + h/2 + dy);
+    ctx.lineTo(cx - w/2 + dx, cy + h/2 + dy);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    ctx.restore();
+
+    // top face (lighter brick)
+    ctx.save();
+    ctx.fillStyle = '#C28560';
     ctx.strokeStyle = '#5C3A24';
     ctx.lineWidth = 2;
-    this._roundRect(ctx, cx - w/2, cy - h/2, w, h, 4);
+    this._roundRect(ctx, cx - w/2 + dx, cy - h/2 + dy, w, h, 4);
     ctx.fill();
     ctx.stroke();
-    // brick rows
+    // brick rows on the top
     ctx.strokeStyle = 'rgba(92,58,36,0.45)';
     ctx.lineWidth = 1;
     const brickH = Math.max(5, 6 * this._zoom);
     ctx.beginPath();
-    for (let y = cy - h/2 + brickH; y < cy + h/2 - 1; y += brickH) {
-      ctx.moveTo(cx - w/2, y);
-      ctx.lineTo(cx + w/2, y);
+    for (let y = (cy - h/2 + dy) + brickH; y < (cy + h/2 + dy) - 1; y += brickH) {
+      ctx.moveTo(cx - w/2 + dx, y);
+      ctx.lineTo(cx + w/2 + dx, y);
     }
     ctx.stroke();
-    // ⬆ icon
-    ctx.fillStyle = '#FFFBEE';
-    ctx.font = `700 ${Math.round(22 * this._zoom)}px "Lexend", system-ui, sans-serif`;
-    ctx.textBaseline = 'middle';
-    ctx.textAlign = 'center';
-    ctx.fillText('▲', cx, cy);
     ctx.restore();
   }
 
-  // Beam = ceiling/overhead obstacle. Diagonal hazard-stripe pattern with
-  // a big ⬇ in the centre. Drone must stay at or below `under_height_cm`
-  // (default 30) while in this footprint.
-  _drawBeam(ctx, cx, cy, w, h) {
+  // Beam = a hazard-striped slab hovering above the floor. Shadow on
+  // the floor + the slab lifted up the canvas, with a dashed tether
+  // between them. Reuses the drone's "shadow + lift" vocabulary so the
+  // kid recognises it as "this is in the air, not on the ground".
+  _drawBeam(ctx, cx, cy, w, h, z) {
+    const heightCm = z.under_height_cm ?? 30;
+    const liftPx   = (heightCm * ALTITUDE_PX_PER_CM + 12) * this._zoom;
+    const dx = -6 * this._zoom;
+    const dy = -liftPx;
+
+    // shadow on the floor (beam's footprint, blurred)
     ctx.save();
-    ctx.fillStyle = 'rgba(240,169,59,0.45)';
+    ctx.fillStyle = 'rgba(26,42,64,0.22)';
+    ctx.filter = `blur(${3 * this._zoom}px)`;
+    this._roundRect(ctx, cx - w/2 + 2 * this._zoom, cy - h/2 + 1 * this._zoom, w, h, 6);
+    ctx.fill();
+    ctx.restore();
+
+    // tether dashes from shadow corners up to beam corners
+    ctx.save();
+    ctx.strokeStyle = 'rgba(26,42,64,0.32)';
+    ctx.lineWidth = 1.2;
+    ctx.setLineDash([3, 4]);
+    ctx.beginPath();
+    ctx.moveTo(cx - w/2,      cy);
+    ctx.lineTo(cx - w/2 + dx, cy + dy);
+    ctx.moveTo(cx + w/2,      cy);
+    ctx.lineTo(cx + w/2 + dx, cy + dy);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+
+    // the beam itself, lifted up + slightly left
+    ctx.save();
+    ctx.fillStyle = '#F0A93B';
     ctx.strokeStyle = '#1A2A40';
     ctx.lineWidth = 2;
-    this._roundRect(ctx, cx - w/2, cy - h/2, w, h, 4);
+    this._roundRect(ctx, cx - w/2 + dx, cy - h/2 + dy, w, h, 4);
     ctx.fill();
     ctx.stroke();
-    // hazard stripes
+    // hazard stripes inside
     ctx.save();
     ctx.beginPath();
-    this._roundRect(ctx, cx - w/2, cy - h/2, w, h, 4);
+    this._roundRect(ctx, cx - w/2 + dx, cy - h/2 + dy, w, h, 4);
     ctx.clip();
-    ctx.strokeStyle = 'rgba(26,42,64,0.32)';
+    ctx.strokeStyle = 'rgba(26,42,64,0.42)';
     ctx.lineWidth = Math.max(4, 6 * this._zoom);
     const step = Math.max(12, 18 * this._zoom);
-    for (let x = cx - w/2 - h; x < cx + w/2 + h; x += step) {
+    for (let x = cx - w/2 + dx - h; x < cx + w/2 + dx + h; x += step) {
       ctx.beginPath();
-      ctx.moveTo(x, cy + h/2);
-      ctx.lineTo(x + h, cy - h/2);
+      ctx.moveTo(x,       cy + h/2 + dy);
+      ctx.lineTo(x + h,   cy - h/2 + dy);
       ctx.stroke();
     }
     ctx.restore();
-    // ⬇ icon
-    ctx.fillStyle = '#1A2A40';
-    ctx.font = `700 ${Math.round(22 * this._zoom)}px "Lexend", system-ui, sans-serif`;
-    ctx.textBaseline = 'middle';
-    ctx.textAlign = 'center';
-    ctx.fillText('▼', cx, cy);
     ctx.restore();
   }
 
