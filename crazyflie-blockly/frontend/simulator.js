@@ -284,12 +284,33 @@ class SimDrone {
       ctx.restore();
     }
 
-    // shadow + drone — drawn at the pixel position derived from cm state
-    const px = this._pxX(this.x_cm);
-    const py = this._pxY(this.y_cm);
-    this._drawShadow(ctx, px, py);
-    this._drawDrone(ctx, px, py);
-    if (this.height > 1) this._drawHeightBadge(ctx, px, py);
+    // shadow + drone. Shadow stays anchored to the world position; the
+    // drone is lifted up the canvas by an amount proportional to altitude.
+    // This is the perspective cue that says "it's hovering, not driving".
+    const px        = this._pxX(this.x_cm);
+    const py_ground = this._pxY(this.y_cm);
+    const liftAlt   = Math.min(1, this.height / 90);
+    const lift      = liftAlt * 52 * this._zoom;
+    const py_drone  = py_ground - lift;
+
+    this._drawShadow(ctx, px, py_ground);
+
+    // faint dashed tether from the shadow up to the drone — only when
+    // we're actually lifted, otherwise it just looks like a stray line
+    if (lift > 6) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(26,42,64,0.22)';
+      ctx.lineWidth = 1.4;
+      ctx.setLineDash([3, 4]);
+      ctx.beginPath();
+      ctx.moveTo(px, py_ground - 2);
+      ctx.lineTo(px, py_drone + 16 * this._zoom);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    this._drawDrone(ctx, px, py_drone);
+    if (this.height > 1) this._drawHeightBadge(ctx, px, py_drone);
   }
 
   _drawZones(ctx) {
@@ -312,16 +333,18 @@ class SimDrone {
     ctx.restore();
   }
 
-  _drawShadow(ctx, px, py) {
-    const altRatio = Math.min(1, this.height / 80);
+  _drawShadow(ctx, px, py_ground) {
+    // The drone is now visually lifted upward (see _draw), so the shadow
+    // stays anchored at the world position. It grows + softens with
+    // altitude so the kid sees "higher = bigger, fuzzier shadow".
+    const altRatio = Math.min(1, this.height / 90);
     const z = this._zoom;
-    const offset = (6 + altRatio * 18) * z;
-    const rx = (22 + altRatio * 18) * z;
-    const ry = (9  + altRatio * 7)  * z;
+    const rx = (16 + altRatio * 14) * z;
+    const ry = (7  + altRatio * 6)  * z;
     ctx.save();
-    ctx.translate(px + offset * 0.4, py + offset);
-    ctx.filter = `blur(${(4 + altRatio * 6) * z}px)`;
-    ctx.fillStyle = `rgba(26,42,64,${0.42 - altRatio * 0.22})`;
+    ctx.translate(px + 2 * z, py_ground + 1 * z);    // tiny tilt
+    ctx.filter = `blur(${(2 + altRatio * 6) * z}px)`;
+    ctx.fillStyle = `rgba(26,42,64,${0.45 - altRatio * 0.22})`;
     ctx.beginPath();
     ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
     ctx.fill();
