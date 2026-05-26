@@ -273,7 +273,10 @@
     const zoomH = halfX > 0
       ? hAvail / (halfX * 3.2)
       : 1.5;
-    return Math.max(0.4, Math.min(1.5, Math.min(zoomV, zoomH)));
+    // Bump one step in (matches a single + press) — the bare-fit zoom
+    // left more empty canvas than feels good, this seats things nicely.
+    const fit = Math.min(zoomV, zoomH) * 1.25;
+    return Math.max(0.4, Math.min(1.5, fit));
   }
 
   function setLevel(id) {
