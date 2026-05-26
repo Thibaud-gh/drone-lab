@@ -16,6 +16,7 @@ const PX_PER_CM = 3.2;             // base canvas scale at zoom 1.0
 const CM_PER_UNIT = 30;             // 1 unit (kid-facing) = 30 cm in the world
 const HOME_BOTTOM_INSET = 70;       // px from canvas bottom edge where the drone sits at home
 const ALTITUDE_PX_PER_CM = 52 / 90; // shared between drone-lift and obstacle perspective
+const DRONE_RADIUS_CM = 8;          // for collision — crash when the drone's edge meets the obstacle's edge
 
 function pluralUnits(n) {
   return n === 1 ? '1 unit' : `${n} units`;
@@ -89,8 +90,11 @@ class SimDrone {
     if (this._lastError) return true;
     if (!this._level || !this._level.zones?.length) return false;
     for (const z of this._level.zones) {
-      const hw = (z.w_cm ?? 30) / 2;
-      const hh = (z.h_cm ?? 30) / 2;
+      // Expand the obstacle's half-bounds by the drone's radius so a
+      // crash fires the moment the drone's BODY touches the obstacle,
+      // not when its center has already crossed in.
+      const hw = (z.w_cm ?? 30) / 2 + DRONE_RADIUS_CM;
+      const hh = (z.h_cm ?? 30) / 2 + DRONE_RADIUS_CM;
       const inX = Math.abs(this.x_cm - (z.x_cm ?? 0)) <= hw;
       const inY = Math.abs(this.y_cm - (z.y_cm ?? 0)) <= hh;
       if (!inX || !inY) continue;
