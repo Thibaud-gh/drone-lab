@@ -28,7 +28,11 @@ SendFn = Callable[[dict], Awaitable[None]]
 
 
 class Drone(ABC):
-    """Shared surface. The generated user code only sees this."""
+    """Shared surface. The generated user code only sees this.
+
+    Movement methods take **units** (kid-facing). 1 unit = 30 cm in
+    the physical world; drivers convert at the boundary.
+    """
 
     @abstractmethod
     async def takeoff(self) -> None: ...
@@ -37,10 +41,16 @@ class Drone(ABC):
     async def land(self) -> None: ...
 
     @abstractmethod
-    async def forward(self, cm: float) -> None: ...
+    async def forward(self, units: float) -> None: ...
 
     @abstractmethod
-    async def up(self, cm: float) -> None: ...
+    async def up(self, units: float) -> None: ...
+
+    @abstractmethod
+    async def turn_left(self) -> None: ...
+
+    @abstractmethod
+    async def turn_right(self) -> None: ...
 
 
 # -----------------------------------------------------------------------
@@ -53,7 +63,10 @@ TAKEOFF_MS = 800
 LAND_MS = 900
 PER_CM_FWD_MS = 28
 PER_CM_UP_MS = 26
+TURN_MS = 450
 EMIT_HZ = 30   # how often we stream state to the browser during a move
+
+CM_PER_UNIT = 30   # 1 unit (kid-facing) = 30 cm in the world
 
 
 class MockDrone(Drone):
@@ -98,13 +111,15 @@ class MockDrone(Drone):
         self.rotor_speed = 0
         await self._emit()
 
-    async def forward(self, cm: float) -> None:
+    async def forward(self, units: float) -> None:
         if self._aborted():
             return
         if not self.flying:
             await self._fail("can't fly forward — take off first!")
             return
-        await self._status(f"flying forward {cm:g} cm")
+        cm = units * CM_PER_UNIT
+        label = f"{units:g} unit" if units == 1 else f"{units:g} units"
+        await self._status(f"flying forward {label}")
         start_x, start_y = self.x_cm, self.y_cm
         dx = math.cos(self.heading) * cm
         dy = math.sin(self.heading) * cm
@@ -114,14 +129,44 @@ class MockDrone(Drone):
         await self._tween(30 + cm * PER_CM_FWD_MS, step, rotor=36)
         self.rotor_speed = 20
 
-    async def up(self, cm: float) -> None:
+    async def up(self, units: float) -> None:
         if self._aborted():
             return
         if not self.flying:
             await self._fail("can't climb — take off first!")
             return
-        await self._status(f"climbing {cm:g} cm")
+        cm = units * CM_PER_UNIT
+        label = f"{units:g} unit" if units == 1 else f"{units:g} units"
+        await self._status(f"climbing {label}")
         await self._tween(30 + cm * PER_CM_UP_MS, self._climb_by(cm), rotor=32)
+        self.rotor_speed = 20
+
+    async def turn_left(self) -> None:
+        if self._aborted():
+            return
+        if not self.flying:
+            await self._fail("can't turn — take off first!")
+            return
+        await self._status("turning left")
+        start = self.heading
+        target = start - math.pi / 2
+        def step(t: float) -> None:
+            self.heading = start + (target - start) * t
+        await self._tween(TURN_MS, step, rotor=28)
+        self.rotor_speed = 20
+
+    async def turn_right(self) -> None:
+        if self._aborted():
+            return
+        if not self.flying:
+            await self._fail("can't turn — take off first!")
+            return
+        await self._status("turning right")
+        start = self.heading
+        target = start + math.pi / 2
+        def step(t: float) -> None:
+            self.heading = start + (target - start) * t
+        await self._tween(TURN_MS, step, rotor=28)
         self.rotor_speed = 20
 
     # ------- internals -------------------------------------------------
@@ -207,5 +252,7 @@ class CrazyflieDrone(Drone):
 
     async def takeoff(self) -> None: ...
     async def land(self) -> None: ...
-    async def forward(self, cm: float) -> None: ...
-    async def up(self, cm: float) -> None: ...
+    async def forward(self, units: float) -> None: ...
+    async def up(self, units: float) -> None: ...
+    async def turn_left(self) -> None: ...
+    async def turn_right(self) -> None: ...

@@ -15,6 +15,8 @@
    ========================================================= */
 
 (function () {
+  // Distances below are in cm under the hood, but kid-facing they are
+  // unit-multiples (1 unit = 30 cm). So 90 cm = 3 units, 60 cm = 2 units.
   window.LEVELS = [
     {
       id: 0,
@@ -26,7 +28,15 @@
       id: 1,
       caption: "Land in the green area",
       zones: [
-        { kind: 'target', x_cm: 0, y_cm: -100, w_cm: 40, h_cm: 40, color: 'green' },
+        { kind: 'target', x_cm: 0, y_cm: -90, w_cm: 40, h_cm: 40, color: 'green' },
+      ],
+      win: { type: 'land_in_zone', zone: 0 },
+    },
+    {
+      id: 2,
+      caption: "Land in the green area (you'll need to turn!)",
+      zones: [
+        { kind: 'target', x_cm: 60, y_cm: -90, w_cm: 25, h_cm: 25, color: 'green' },
       ],
       win: { type: 'land_in_zone', zone: 0 },
     },

@@ -13,6 +13,8 @@
 
   py.forBlock['take_off']    = () => 'drone.takeoff()\n';
   py.forBlock['land']        = () => 'drone.land()\n';
+  py.forBlock['turn_left']   = () => 'drone.turn_left()\n';
+  py.forBlock['turn_right']  = () => 'drone.turn_right()\n';
   py.forBlock['fly_forward'] = (block) => {
     const n = block.getFieldValue('DISTANCE');
     return `drone.forward(${n})\n`;
@@ -36,6 +38,8 @@
 
   js.forBlock['take_off']    = () => 'await drone.takeoff();\n';
   js.forBlock['land']        = () => 'await drone.land();\n';
+  js.forBlock['turn_left']   = () => 'await drone.turn_left();\n';
+  js.forBlock['turn_right']  = () => 'await drone.turn_right();\n';
   js.forBlock['fly_forward'] = (block) => {
     const n = block.getFieldValue('DISTANCE');
     return `await drone.forward(${n});\n`;

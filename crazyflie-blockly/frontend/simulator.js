@@ -13,7 +13,12 @@
    ========================================================= */
 
 const PX_PER_CM = 3.2;             // base canvas scale at zoom 1.0
+const CM_PER_UNIT = 30;             // 1 unit (kid-facing) = 30 cm in the world
 const HOME_BOTTOM_INSET = 70;       // px from canvas bottom edge where the drone sits at home
+
+function pluralUnits(n) {
+  return n === 1 ? '1 unit' : `${n} units`;
+}
 
 // Drone "home" — bottom-centre of the canvas in pixels. Cached on each
 // _draw call since it depends on canvas size.
@@ -117,14 +122,15 @@ class SimDrone {
     this._rotorSpeed = 0;
   }
 
-  async forward(cm) {
+  async forward(units) {
     if (this._stopped || this._lastError) return;
     const gen = this._gen;
     if (!this.flying) {
       this._fail("can't fly forward — take off first!");
       return;
     }
-    this._setStatus(`flying forward ${cm} cm`, 'flying');
+    const cm = units * CM_PER_UNIT;
+    this._setStatus(`flying forward ${pluralUnits(units)}`, 'flying');
     const startXcm = this.x_cm, startYcm = this.y_cm;
     const dx_cm = Math.cos(this.heading) * cm;
     const dy_cm = Math.sin(this.heading) * cm;
@@ -141,16 +147,55 @@ class SimDrone {
     this._rotorSpeed = 20;
   }
 
-  async up(cm) {
+  async up(units) {
     if (this._stopped || this._lastError) return;
     const gen = this._gen;
     if (!this.flying) {
       this._fail("can't climb — take off first!");
       return;
     }
-    this._setStatus(`climbing ${cm} cm`, 'flying');
+    const cm = units * CM_PER_UNIT;
+    this._setStatus(`climbing ${pluralUnits(units)}`, 'flying');
     this._rotorSpeed = 32;
     await this._tween(this.height, this.height + cm, 30 + cm * 26, (v) => this.height = v);
+    if (gen !== this._gen) return;
+    this._rotorSpeed = 20;
+  }
+
+  async turn_left() {
+    if (this._stopped || this._lastError) return;
+    const gen = this._gen;
+    if (!this.flying) {
+      this._fail("can't turn — take off first!");
+      return;
+    }
+    this._setStatus('turning left', 'flying');
+    const start = this.heading;
+    const target = start - Math.PI / 2;
+    this._rotorSpeed = 28;
+    await this._tween(0, 1, 450, (t) => {
+      if (gen !== this._gen) return;
+      this.heading = start + (target - start) * t;
+    });
+    if (gen !== this._gen) return;
+    this._rotorSpeed = 20;
+  }
+
+  async turn_right() {
+    if (this._stopped || this._lastError) return;
+    const gen = this._gen;
+    if (!this.flying) {
+      this._fail("can't turn — take off first!");
+      return;
+    }
+    this._setStatus('turning right', 'flying');
+    const start = this.heading;
+    const target = start + Math.PI / 2;
+    this._rotorSpeed = 28;
+    await this._tween(0, 1, 450, (t) => {
+      if (gen !== this._gen) return;
+      this.heading = start + (target - start) * t;
+    });
     if (gen !== this._gen) return;
     this._rotorSpeed = 20;
   }
@@ -186,7 +231,8 @@ class SimDrone {
 
   _updateHud() {
     if (!this.hud) return;
-    this.hud.height.firstChild.textContent = Math.round(this.height);
+    // height stored in cm; HUD shows units (1 unit = 30 cm)
+    this.hud.height.firstChild.textContent = (this.height / CM_PER_UNIT).toFixed(1);
   }
 
   _loop() {
@@ -369,7 +415,8 @@ class SimDrone {
 
   _drawHeightBadge(ctx, px, py) {
     const z = this._zoom;
-    const label = `↑ ${Math.round(this.height)}cm`;
+    const units = (this.height / CM_PER_UNIT).toFixed(1);
+    const label = `↑ ${units}`;
     ctx.save();
     ctx.font = `500 ${Math.round(12 * z)}px "Lexend", system-ui, sans-serif`;
     const padX = 8 * z;
