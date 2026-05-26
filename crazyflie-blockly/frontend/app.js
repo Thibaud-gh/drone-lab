@@ -245,6 +245,37 @@
     });
   }
 
+  // Choose a canvas zoom that fits every zone of `level` on the canvas
+  // with a margin. Drone home is at (0, 0); world y grows negative going
+  // forward. We add a vertical buffer so walls/beams (which render
+  // *above* their world y by an altitude offset) don't get cut at the
+  // top of the canvas.
+  const VERTICAL_BUFFER_CM = 60;
+  function autoFitZoom(level) {
+    let minX = 0, maxX = 0, minY = 0;   // y stays ≤ 0 (home is the floor)
+    for (const z of (level.zones || [])) {
+      const hw = (z.w_cm ?? 30) / 2;
+      const hh = (z.h_cm ?? 30) / 2;
+      minX = Math.min(minX, (z.x_cm ?? 0) - hw);
+      maxX = Math.max(maxX, (z.x_cm ?? 0) + hw);
+      minY = Math.min(minY, (z.y_cm ?? 0) - hh);
+    }
+    const effMinY = minY - VERTICAL_BUFFER_CM;
+    const cssW = canvas._cssW || canvas.width || 400;
+    const cssH = canvas._cssH || canvas.height || 480;
+    const margin = 30;
+    const vAvail = Math.max(80, cssH - 70 - margin);
+    const hAvail = Math.max(80, cssW / 2 - margin);
+    const zoomV = Math.abs(effMinY) > 0
+      ? vAvail / (Math.abs(effMinY) * 3.2)
+      : 1.5;
+    const halfX = Math.max(Math.abs(minX), Math.abs(maxX));
+    const zoomH = halfX > 0
+      ? hAvail / (halfX * 3.2)
+      : 1.5;
+    return Math.max(0.4, Math.min(1.5, Math.min(zoomV, zoomH)));
+  }
+
   function setLevel(id) {
     const lvl = LEVELS.find(l => l.id === id);
     if (!lvl) return;
@@ -254,6 +285,10 @@
     drone.reset();
     setResetMode(false);
     applyPalette(lvl);
+    // Fit the canvas zoom so every zone in this level is comfortably on
+    // screen. Reset each time — switching levels gives the kid a fresh
+    // view regardless of how she'd zoomed the previous level.
+    applyCanvasZoom(autoFitZoom(lvl));
     // Fresh workspace per level — avoids leftover blocks the new palette
     // wouldn't allow the kid to add back.
     workspace.clear();

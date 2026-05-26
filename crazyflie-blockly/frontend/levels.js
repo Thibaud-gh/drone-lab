@@ -37,7 +37,7 @@
       caption: "Land in the green area",
       palette: ['take_off', 'fly_forward', 'land'],
       zones: [
-        { kind: 'target', x_cm: 0, y_cm: -90, w_cm: 40, h_cm: 40, color: 'green' },
+        { kind: 'target', x_cm: 0, y_cm: -150, w_cm: 40, h_cm: 40, color: 'green' },
       ],
       win: { type: 'land_in_zone', zone: 0 },
     },
@@ -46,7 +46,7 @@
       caption: "Land in the green area (you'll need to turn!)",
       palette: ['take_off', 'fly_forward', 'turn_left', 'turn_right', 'land'],
       zones: [
-        { kind: 'target', x_cm: 60, y_cm: -90, w_cm: 25, h_cm: 25, color: 'green' },
+        { kind: 'target', x_cm: 60, y_cm: -150, w_cm: 25, h_cm: 25, color: 'green' },
       ],
       win: { type: 'land_in_zone', zone: 0 },
     },
@@ -55,14 +55,14 @@
       // (bottom at 60 cm), then land. Strict inequalities — at the
       // obstacle's exact height the drone touches it and crashes.
       // Solution: take_off → up 1 (h=2) → forward 2 (over wall) →
-      // down 1 (h=1) → forward 2 (under beam, into zone) → land.
+      // down 1 (h=1) → forward 4 (under beam, into zone) → land.
       id: 3,
       caption: "Fly OVER the wall and UNDER the beam, then land",
       palette: ['take_off', 'fly_forward', 'fly_up', 'fly_down', 'land'],
       zones: [
         { kind: 'wall',   x_cm: 0, y_cm: -30, w_cm: 80, h_cm: 12, over_height_cm: 30 },
         { kind: 'beam',   x_cm: 0, y_cm: -90, w_cm: 80, h_cm: 12, under_height_cm: 60 },
-        { kind: 'target', x_cm: 0, y_cm: -120, w_cm: 30, h_cm: 30, color: 'green' },
+        { kind: 'target', x_cm: 0, y_cm: -180, w_cm: 30, h_cm: 30, color: 'green' },
       ],
       win: { type: 'land_in_zone', zone: 2 },
     },
