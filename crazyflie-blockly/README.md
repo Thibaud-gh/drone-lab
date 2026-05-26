@@ -2,6 +2,8 @@
 
 A block-coding app for flying a Bitcraze Crazyflie 2.1+ — built for a 5-to-7-year-old. See [../blockly_handoff.md](../blockly_handoff.md) for the full project brief, and [../CLAUDE.md](../CLAUDE.md) for architecture + UX decisions.
 
+**Live demo:** https://thibaudsenechal.github.io/drone-lab/ — pretend mode only (no drone or bridge needed, runs entirely in the browser).
+
 ## Running
 
 ```sh

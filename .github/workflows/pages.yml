@@ -1,0 +1,45 @@
+name: Deploy frontend to GitHub Pages
+
+# Publishes crazyflie-blockly/frontend/ as a static site whenever main
+# moves. Pretend mode runs entirely in the browser, so the public demo
+# works without any server. Real-drone mode stays disabled there (the
+# bridge expects to run on the user's own machine).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crazyflie-blockly/frontend/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload frontend as Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: crazyflie-blockly/frontend
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
