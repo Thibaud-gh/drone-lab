@@ -34,6 +34,9 @@ jobs:
 
       - name: Set up Pages
         uses: actions/configure-pages@v5
+        with:
+          # auto-enable Pages on first run (saves a trip to the settings page)
+          enablement: true
 
       - name: Upload frontend as Pages artifact
         uses: actions/upload-pages-artifact@v3
