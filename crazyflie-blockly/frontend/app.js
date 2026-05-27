@@ -12,16 +12,22 @@
   // Block definitions in blocks.js stay the source of truth for shape +
   // generators; this list just maps types to a friendly label + icon.
   const PALETTE = [
-    { type: 'take_off',    label: 'take off',   iconKey: 'TAKEOFF' },
-    { type: 'fly_forward', label: 'fly forward', iconKey: 'FORWARD', hint: '1 unit' },
-    { type: 'fly_up',      label: 'fly up',     iconKey: 'UP',      hint: '1 unit' },
-    { type: 'fly_down',    label: 'fly down',   iconKey: 'DOWN',    hint: '1 unit' },
-    { type: 'turn_left',   label: 'turn left',  iconKey: 'TURN_LEFT' },
-    { type: 'turn_right',  label: 'turn right', iconKey: 'TURN_RIGHT' },
-    { type: 'land',        label: 'land',       iconKey: 'LAND' },
+    { type: 'take_off',      label: 'take off',   iconKey: 'TAKEOFF' },
+    // Mid-sequence variant — same look, but with connectors on both
+    // sides so it can be placed after a landing inside a repeat body
+    // (used by levels with multiple landings: L3, L6, sandbox).
+    { type: 'take_off_loop', label: 'take off',   iconKey: 'TAKEOFF' },
+    { type: 'fly_forward',   label: 'fly forward', iconKey: 'FORWARD', hint: '1 unit' },
+    { type: 'fly_up',        label: 'fly up',     iconKey: 'UP',      hint: '1 unit' },
+    { type: 'fly_down',      label: 'fly down',   iconKey: 'DOWN',    hint: '1 unit' },
+    { type: 'turn_left',     label: 'turn left',  iconKey: 'TURN_LEFT' },
+    { type: 'turn_right',    label: 'turn right', iconKey: 'TURN_RIGHT' },
+    { type: 'land',          label: 'land',       iconKey: 'LAND' },
+    // Mid-sequence land — pairs with take_off_loop for the same levels.
+    { type: 'land_loop',     label: 'land',       iconKey: 'LAND' },
     // Marigold logic tile sits below the dotted divider — it WRAPS other
     // blocks rather than living in the chain like the flight blocks do.
-    { type: 'repeat_n',    label: 'repeat',     iconKey: 'REPEAT', hint: '4×', tileClass: 'tile--logic' },
+    { type: 'repeat_n',      label: 'repeat',     iconKey: 'REPEAT', hint: '4×', tileClass: 'tile--logic' },
   ];
 
   // Same SVG icons as on the blocks (white strokes on the orange tile).
@@ -379,15 +385,28 @@
           : { won: false, reason: 'you landed in the wrong area' };
       }
       case 'pickup_then_land': {
-        const picked = d._pickedUpZones?.has(level.win.pickup);
-        if (!picked) return { won: false, reason: "you forgot the package!" };
+        // `pickup` may be a single zone index OR an array of indices —
+        // arrays require ALL of them to have been visited before win.
+        const required = Array.isArray(level.win.pickup)
+          ? level.win.pickup
+          : [level.win.pickup];
+        const missed = required.filter(idx => !d._pickedUpZones?.has(idx));
+        if (missed.length > 0) {
+          const reason =
+            missed.length === 1 && required.length === 1 ? "you forgot the package!" :
+            missed.length === 1 ? "you forgot a package!" :
+            `you forgot ${missed.length} packages!`;
+          return { won: false, reason };
+        }
         const z = level.zones[level.win.zone];
         if (!z) return { won: true };
         const inX = Math.abs(d.x_cm - (z.x_cm ?? 0)) <= (z.w_cm ?? 30) / 2;
         const inY = Math.abs(d.y_cm - (z.y_cm ?? 0)) <= (z.h_cm ?? 30) / 2;
         return inX && inY
           ? { won: true }
-          : { won: false, reason: 'you grabbed the package but landed in the wrong area' };
+          : { won: false, reason: required.length === 1
+              ? 'you grabbed the package but landed in the wrong area'
+              : 'you grabbed all the packages but landed in the wrong area' };
       }
       default:
         return { won: true };

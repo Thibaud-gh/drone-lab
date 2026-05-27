@@ -11,10 +11,12 @@
 
   // --- Python ---------------------------------------------
 
-  py.forBlock['take_off']    = () => 'drone.takeoff()\n';
-  py.forBlock['land']        = () => 'drone.land()\n';
-  py.forBlock['turn_left']   = () => 'drone.turn_left()\n';
-  py.forBlock['turn_right']  = () => 'drone.turn_right()\n';
+  py.forBlock['take_off']      = () => 'drone.takeoff()\n';
+  py.forBlock['take_off_loop'] = () => 'drone.takeoff()\n';
+  py.forBlock['land']          = () => 'drone.land()\n';
+  py.forBlock['land_loop']     = () => 'drone.land()\n';
+  py.forBlock['turn_left']     = () => 'drone.turn_left()\n';
+  py.forBlock['turn_right']    = () => 'drone.turn_right()\n';
   py.forBlock['fly_forward'] = (block) => {
     const n = block.getFieldValue('DISTANCE');
     return `drone.forward(${n})\n`;
@@ -46,10 +48,12 @@
 
   // --- JavaScript (drives the in-browser simulator) -------
 
-  js.forBlock['take_off']    = () => 'await drone.takeoff();\n';
-  js.forBlock['land']        = () => 'await drone.land();\n';
-  js.forBlock['turn_left']   = () => 'await drone.turn_left();\n';
-  js.forBlock['turn_right']  = () => 'await drone.turn_right();\n';
+  js.forBlock['take_off']      = () => 'await drone.takeoff();\n';
+  js.forBlock['take_off_loop'] = () => 'await drone.takeoff();\n';
+  js.forBlock['land']          = () => 'await drone.land();\n';
+  js.forBlock['land_loop']     = () => 'await drone.land();\n';
+  js.forBlock['turn_left']     = () => 'await drone.turn_left();\n';
+  js.forBlock['turn_right']    = () => 'await drone.turn_right();\n';
   js.forBlock['fly_forward'] = (block) => {
     const n = block.getFieldValue('DISTANCE');
     return `await drone.forward(${n});\n`;

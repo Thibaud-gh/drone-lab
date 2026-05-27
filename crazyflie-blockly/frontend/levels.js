@@ -31,9 +31,12 @@
    ========================================================= */
 
 (function () {
+  // Sandbox allows multiple landings, so it uses the *_loop flight
+  // variants (take_off / land with connectors on both sides). Other
+  // levels with a single landing zone use the plain take_off / land.
   const ALL_BLOCKS = [
-    'take_off', 'fly_forward', 'fly_up', 'fly_down',
-    'turn_left', 'turn_right', 'repeat_n', 'land',
+    'take_off_loop', 'fly_forward', 'fly_up', 'fly_down',
+    'turn_left', 'turn_right', 'repeat_n', 'land_loop',
   ];
 
   window.LEVELS = [
@@ -61,7 +64,8 @@
       // start, the delivery zone sits to the RIGHT — same y as L2.
       id: 3,
       caption: "Pick up the package, then deliver it to the green area",
-      palette: ['take_off', 'fly_forward', 'turn_left', 'turn_right', 'land'],
+      // Two landings (pickup + delivery) → uses *_loop flight variants.
+      palette: ['take_off_loop', 'fly_forward', 'turn_left', 'turn_right', 'land_loop'],
       zones: [
         { kind: 'pickup', x_cm: -60, y_cm: -150, w_cm: 25, h_cm: 25 },
         { kind: 'target', x_cm:  60, y_cm: -150, w_cm: 25, h_cm: 25, color: 'green' },
@@ -113,14 +117,37 @@
       win: { type: 'land_in_zone', zone: 6 },
     },
     {
-      // L6 — introduces the loop block. Walls force a staircase path
-      // (forward, turn_right, forward, turn_left) repeated 4 times. We
-      // deliberately drop fly_up / fly_down from the palette so the kid
-      // can't bypass the walls by climbing over them — the only way
-      // through is the zig-zag, which screams "repeat me!"
+      // L6 — gentle intro to the loop block. Three packages plus the
+      // green landing area in a straight line ahead of the drone, one
+      // unit apart. Each "hop" is exactly the same dance: take off →
+      // forward 1 → land. Four hops in a row is the obvious place for
+      // a repeat block — the loop body is just 3 blocks, no turns.
+      //
+      // Solution: repeat 4 × (take_off, forward 1, land).
+      //   With the loop:  4 visible blocks.
+      //   Without:       12 blocks (the same trio four times).
+      id: 6,
+      caption: "Grab every package on the way — same hop, again and again. Can repeat help?",
+      // Four landings (3 pickups + delivery) → uses *_loop variants so
+      // take_off / land can live inside the repeat body.
+      palette: ['take_off_loop', 'fly_forward', 'repeat_n', 'land_loop'],
+      zones: [
+        { kind: 'pickup', x_cm: 0, y_cm:  -30, w_cm: 25, h_cm: 25 },
+        { kind: 'pickup', x_cm: 0, y_cm:  -60, w_cm: 25, h_cm: 25 },
+        { kind: 'pickup', x_cm: 0, y_cm:  -90, w_cm: 25, h_cm: 25 },
+        { kind: 'target', x_cm: 0, y_cm: -120, w_cm: 25, h_cm: 25, color: 'green' },
+      ],
+      win: { type: 'pickup_then_land', pickup: [0, 1, 2], zone: 3 },
+    },
+    {
+      // L7 — introduces the loop block in earnest. Walls force a
+      // staircase path (forward, turn_right, forward, turn_left)
+      // repeated 4 times. We deliberately drop fly_up / fly_down from
+      // the palette so the kid can't bypass the walls by climbing over
+      // them — the only way through is the zig-zag.
       // Solution: take_off → repeat 4 × (forward 1, turn_right,
       //                                   forward 1, turn_left) → land.
-      id: 6,
+      id: 7,
       caption: "Climb the staircase — the same dance, over and over",
       palette: ['take_off', 'fly_forward', 'turn_left', 'turn_right',
                 'repeat_n', 'land'],

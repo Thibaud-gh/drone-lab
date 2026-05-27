@@ -61,6 +61,15 @@
       <path d="M4 6 L9 10 L5 15" />
     </g></svg>`);
 
+  // take_off and land each come in TWO shapes:
+  //   • take_off / land  — starter + terminator. Match the
+  //     "one flight, one landing" feel of L1, L2, L4, L5, L7.
+  //   • take_off_loop / land_loop — connectors on every side so they
+  //     can live mid-sequence (and inside repeat bodies). Used by
+  //     levels with multiple landings: L3 (pickup-and-deliver), L6
+  //     (hop), and sandbox.
+  // The kid sees identical tiles in the palette either way — the
+  // level's palette decides which type the tile actually inserts.
   Blockly.common.defineBlocksWithJsonArray([
     {
       type: 'take_off',
@@ -68,6 +77,17 @@
       args0: [
         { type: 'field_image', src: ICON_TAKEOFF, width: 22, height: 22, alt: 'takeoff' },
       ],
+      nextStatement: null,
+      style: 'flight_blocks',
+      tooltip: 'lift off and hover',
+    },
+    {
+      type: 'take_off_loop',
+      message0: '%1 take off',
+      args0: [
+        { type: 'field_image', src: ICON_TAKEOFF, width: 22, height: 22, alt: 'takeoff' },
+      ],
+      previousStatement: null,
       nextStatement: null,
       style: 'flight_blocks',
       tooltip: 'lift off and hover',
@@ -156,6 +176,17 @@
         { type: 'field_image', src: ICON_LAND, width: 22, height: 22, alt: 'land' },
       ],
       previousStatement: null,
+      style: 'flight_blocks',
+      tooltip: 'come back down gently',
+    },
+    {
+      type: 'land_loop',
+      message0: '%1 land',
+      args0: [
+        { type: 'field_image', src: ICON_LAND, width: 22, height: 22, alt: 'land' },
+      ],
+      previousStatement: null,
+      nextStatement: null,
       style: 'flight_blocks',
       tooltip: 'come back down gently',
     },
