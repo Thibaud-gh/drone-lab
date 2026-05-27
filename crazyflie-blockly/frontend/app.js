@@ -632,6 +632,12 @@
   canvas.addEventListener('pointerup', endPan);
   canvas.addEventListener('pointercancel', endPan);
 
+  // Double-click to recenter: reset pan + re-fit zoom to the level.
+  canvas.addEventListener('dblclick', () => {
+    drone.setPan(0, 0);
+    applyCanvasZoom(autoFitZoom(currentLevel));
+  });
+
   // ----- Boot ------------------------------------------------------------
   // Last thing in the IIFE so every declaration above has run before
   // setLevel(0) calls setResetMode(false) (which reads `let resetMode`).
