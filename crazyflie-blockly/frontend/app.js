@@ -19,6 +19,9 @@
     { type: 'turn_left',   label: 'turn left',  iconKey: 'TURN_LEFT' },
     { type: 'turn_right',  label: 'turn right', iconKey: 'TURN_RIGHT' },
     { type: 'land',        label: 'land',       iconKey: 'LAND' },
+    // Marigold logic tile sits below the dotted divider — it WRAPS other
+    // blocks rather than living in the chain like the flight blocks do.
+    { type: 'repeat_n',    label: 'repeat',     iconKey: 'REPEAT', hint: '4×', tileClass: 'tile--logic' },
   ];
 
   // Same SVG icons as on the blocks (white strokes on the orange tile).
@@ -29,6 +32,7 @@
     DOWN:       `<svg viewBox="0 0 32 32" class="tile__icon"><g fill="none" stroke="#FFFBEE" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M16 5 L16 25"/><path d="M9 19 L16 26 L23 19"/></g></svg>`,
     TURN_LEFT:  `<svg viewBox="0 0 32 32" class="tile__icon"><g fill="none" stroke="#FFFBEE" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M22 24 A11 11 0 0 0 11 13 L4 13"/><path d="M10 7 L4 13 L10 19"/></g></svg>`,
     TURN_RIGHT: `<svg viewBox="0 0 32 32" class="tile__icon"><g fill="none" stroke="#FFFBEE" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M10 24 A11 11 0 0 1 21 13 L28 13"/><path d="M22 7 L28 13 L22 19"/></g></svg>`,
+    REPEAT:     `<svg viewBox="0 0 32 32" class="tile__icon"><g fill="none" stroke="#FFFBEE" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18 A9 9 0 1 0 9 10"/><path d="M4 6 L9 10 L5 15"/></g></svg>`,
     LAND:       `<svg viewBox="0 0 32 32" class="tile__icon"><g fill="none" stroke="#FFFBEE" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4 L16 20"/><path d="M9 14 L16 21 L23 14"/><path d="M5 27 L27 27" stroke-dasharray="2 3"/></g></svg>`,
   };
 
@@ -49,7 +53,7 @@
   for (const item of PALETTE) {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'tile';
+    btn.className = 'tile' + (item.tileClass ? ' ' + item.tileClass : '');
     btn.dataset.block = item.type;
     btn.draggable = true;
     btn.innerHTML = `${ICONS[item.iconKey] || ''}<span class="tile__label">${item.label}</span>${item.hint ? `<span class="tile__hint">${item.hint}</span>` : ''}`;
@@ -264,7 +268,10 @@
     const cssW = canvas._cssW || canvas.width || 400;
     const cssH = canvas._cssH || canvas.height || 480;
     const margin = 30;
-    const vAvail = Math.max(80, cssH - 70 - margin);
+    // Mirrors HOME_BOTTOM_INSET in simulator.js (kept in sync) and honours
+    // per-level overrides so the zoom fit matches the drone's actual home.
+    const yInset = (typeof level.home_y_inset_px === 'number') ? level.home_y_inset_px : 70;
+    const vAvail = Math.max(80, cssH - yInset - margin);
     // Home may be off-centre (e.g. L4's bottom-left start). Split available
     // horizontal space into left/right halves around the home anchor so the
     // fit considers asymmetric layouts.
@@ -279,13 +286,58 @@
     const zoomH = Math.min(zoomHLeft, zoomHRight);
     // Bump one step in (matches a single + press) — the bare-fit zoom
     // left more empty canvas than feels good, this seats things nicely.
-    const fit = Math.min(zoomV, zoomH) * 1.25;
+    // Levels with denser visuals (e.g. L6's labyrinth) can override the
+    // multiplier to start more zoomed in.
+    const mult = (typeof level.zoom_multiplier === 'number') ? level.zoom_multiplier : 1.25;
+    const fit = Math.min(zoomV, zoomH) * mult;
     return Math.max(0.4, Math.min(1.5, fit));
+  }
+
+  // ===== Per-level workspace persistence ========================
+  // Each level has its own slot in localStorage so the kid can hop
+  // between levels without losing her work — and surviving a page
+  // reload too. Saved/restored as Blockly's JSON serialization.
+  const WORKSPACE_STORAGE_PREFIX = 'drone_lab.workspace.';
+
+  function persistWorkspaceForLevel(levelId) {
+    try {
+      if (workspace.getTopBlocks(false).length === 0) {
+        localStorage.removeItem(WORKSPACE_STORAGE_PREFIX + levelId);
+      } else {
+        const state = Blockly.serialization.workspaces.save(workspace);
+        localStorage.setItem(WORKSPACE_STORAGE_PREFIX + levelId, JSON.stringify(state));
+      }
+    } catch (_) {
+      // localStorage can be unavailable (private mode, quota). Silent —
+      // not critical to gameplay.
+    }
+  }
+
+  function restoreWorkspaceForLevel(levelId) {
+    try {
+      const raw = localStorage.getItem(WORKSPACE_STORAGE_PREFIX + levelId);
+      if (!raw) return;
+      Blockly.serialization.workspaces.load(JSON.parse(raw), workspace);
+      // Re-anchor click-to-insert at the bottom of the first chain so
+      // the kid can keep appending right where she left off.
+      const tops = workspace.getTopBlocks(true);
+      if (tops.length) {
+        let bottom = tops[0];
+        while (bottom.nextConnection?.targetBlock()) {
+          bottom = bottom.nextConnection.targetBlock();
+        }
+        setLastActive(bottom);
+      }
+    } catch (_) { /* corrupted slot — fall through to empty workspace */ }
   }
 
   function setLevel(id) {
     const lvl = LEVELS.find(l => l.id === id);
     if (!lvl) return;
+    // Stash the previous level's blocks before we swap them out.
+    if (currentLevel && currentLevel.id !== id) {
+      persistWorkspaceForLevel(currentLevel.id);
+    }
     currentLevel = lvl;
     captionEl.textContent = lvl.caption;
     drone.setLevel(lvl);
@@ -297,10 +349,11 @@
     // view regardless of how she'd zoomed/panned the previous level.
     drone.setPan(0, 0);
     applyCanvasZoom(autoFitZoom(lvl));
-    // Fresh workspace per level — avoids leftover blocks the new palette
-    // wouldn't allow the kid to add back.
+    // Fresh workspace per level — clear first, then drop in whatever
+    // the kid had built on this level before (if anything).
     workspace.clear();
     setLastActive(null);
+    restoreWorkspaceForLevel(id);
     refreshCode();
     updateHintVisibility();
     // mark active tab — compare as strings so 'sandbox' matches
@@ -362,6 +415,7 @@
     host.classList.toggle('has-blocks', hasBlocks);
   }
 
+  let persistTimer = null;
   workspace.addChangeListener((e) => {
     // Anchor tracking — fire on UI events too (SELECTED is a UI event)
     if (e.type === Blockly.Events.SELECTED && e.newElementId) {
@@ -378,6 +432,12 @@
     if (e.isUiEvent) return;
     refreshCode();
     updateHintVisibility();
+    // Persist this level's blocks (debounced) so a page reload mid-build
+    // doesn't lose work between explicit level switches.
+    if (currentLevel) {
+      clearTimeout(persistTimer);
+      persistTimer = setTimeout(() => persistWorkspaceForLevel(currentLevel.id), 400);
+    }
   });
 
   // ----- Custom big-bin: drop a block here to delete --------------------
@@ -516,8 +576,10 @@
     await wait(120);
 
     try {
-      const fn = new Function('drone', `return (async () => {\n${code}\n})();`);
-      await fn(drone);
+      // Loop blocks reference `flightGen` to bail out the moment the kid
+      // hits reset mid-flight — see the repeat_n JS generator.
+      const fn = new Function('drone', 'flightGen', `return (async () => {\n${code}\n})();`);
+      await fn(drone, flightGen);
       // If the kid pressed reset mid-flight, drone._gen has moved on.
       // Reset already set status to "ready when you are"; don't overwrite.
       if (drone._gen !== flightGen) return;

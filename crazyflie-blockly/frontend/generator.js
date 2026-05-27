@@ -27,6 +27,12 @@
     const n = block.getFieldValue('DISTANCE');
     return `drone.down(${n})\n`;
   };
+  py.forBlock['repeat_n'] = (block) => {
+    const n = block.getFieldValue('TIMES');
+    // statementToCode already indents the body using the generator's INDENT.
+    const body = py.statementToCode(block, 'DO') || (py.INDENT + 'pass\n');
+    return `for _ in range(${n}):\n${body}`;
+  };
 
   // Tell the Python generator to emit a comment header
   py.init = (function (orig) {
@@ -55,5 +61,19 @@
   js.forBlock['fly_down'] = (block) => {
     const n = block.getFieldValue('DISTANCE');
     return `await drone.down(${n});\n`;
+  };
+  // Repeat loop — break out the moment the kid hits reset mid-flight so
+  // subsequent iterations don't keep running against the freshly-reset
+  // drone. `flightGen` is captured in app.js when the run starts and
+  // injected as a parameter to the generated async wrapper.
+  js.forBlock['repeat_n'] = (block) => {
+    const n = block.getFieldValue('TIMES');
+    const body = js.statementToCode(block, 'DO');
+    return (
+      `for (let i = 0; i < ${n}; i++) {\n` +
+      `  if (drone._gen !== flightGen) break;\n` +
+      `${body}` +
+      `}\n`
+    );
   };
 })();

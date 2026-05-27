@@ -29,7 +29,11 @@ function droneHomeXY(canvas, level) {
   const h = canvas._cssH || canvas.height;
   // Per-level horizontal anchor: 0 = left edge, 1 = right edge, default = centre.
   const xFrac = (level && typeof level.home_x_frac === 'number') ? level.home_x_frac : 0.5;
-  return { x: w * xFrac, y: h - HOME_BOTTOM_INSET };
+  // Per-level bottom inset (px). Levels with a tall vertical extent can
+  // push the drone up a bit so the corridor doesn't run off the top.
+  const yInset = (level && typeof level.home_y_inset_px === 'number')
+    ? level.home_y_inset_px : HOME_BOTTOM_INSET;
+  return { x: w * xFrac, y: h - yInset };
 }
 
 class SimDrone {
@@ -436,23 +440,108 @@ class SimDrone {
       const kind = z.kind || 'target';
       if      (kind === 'target') this._drawTarget(ctx, cx, cy, w, h, z);
       else if (kind === 'pickup') this._drawPickup(ctx, cx, cy, w, h, z, this._level.zones.indexOf(z));
-      else if (kind === 'wall')   this._drawWallFootprint(ctx, cx, cy, w, h);
-      else if (kind === 'beam')   this._drawBeamShadow(ctx, cx, cy, w, h);
+      // Grouped walls suppress their per-rect dashed footprint — the
+      // merged slab carries the visual on its own.
+      else if (kind === 'wall' && !z.group)  this._drawWallFootprint(ctx, cx, cy, w, h);
+      else if (kind === 'beam')              this._drawBeamShadow(ctx, cx, cy, w, h);
     }
   }
 
   // 2nd pass — walls. Drawn after the trail but before the drone, so a
   // drone flying OVER the wall passes visually over (drawn on top).
+  //
+  // Walls with a matching `group` field are merged into one visual
+  // shape (the L6 corridor uses this so the 18 rectangles read as a
+  // single staircase, not stacked sticks). Solo walls go through the
+  // existing per-wall renderer.
   _drawWalls(ctx) {
     if (!this._level || !this._level.zones?.length) return;
+    const groups = new Map();
+    let soloIdx = 0;
     for (const z of this._level.zones) {
       if (z.kind !== 'wall') continue;
+      const gid = z.group ?? `__solo_${soloIdx++}`;
+      if (!groups.has(gid)) groups.set(gid, []);
+      groups.get(gid).push(z);
+    }
+    for (const walls of groups.values()) {
+      if (walls.length === 1) {
+        const z = walls[0];
+        const cx = this._pxX(z.x_cm ?? 0);
+        const cy = this._pxY(z.y_cm ?? 0);
+        const w  = (z.w_cm ?? 30) * PX_PER_CM * this._zoom;
+        const h  = (z.h_cm ?? 30) * PX_PER_CM * this._zoom;
+        this._drawWall(ctx, cx, cy, w, h, z);
+      } else {
+        this._drawWallGroup(ctx, walls);
+      }
+    }
+  }
+
+  // Render a group of walls as one merged shape — used by L6's corridor
+  // so the staircase reads as a single contiguous wall rather than a
+  // pile of overlapping rectangles.
+  //
+  // Technique ("inflated fill"):
+  //   1. For each member rect, fill an inflated version (+2 px on each
+  //      side) in the stroke colour. Where two rects abut, the next
+  //      rect's fill (step 2) covers its halo and the seam disappears.
+  //      Outer edges keep the halo, which becomes the merged outline.
+  //   2. Fill each rect at its normal size in the slab colour.
+  //   3. Brick texture, clipped to the union, so brick lines span the
+  //      whole shape uniformly.
+  // No individual posts / footprint / labels per member rect — the
+  // shape speaks for itself.
+  _drawWallGroup(ctx, walls) {
+    const heightCm = walls[0].over_height_cm ?? 30;
+    const liftPx   = heightCm * ALTITUDE_PX_PER_CM * this._zoom;
+    const rects = walls.map(z => {
       const cx = this._pxX(z.x_cm ?? 0);
-      const cy = this._pxY(z.y_cm ?? 0);
+      const cy = this._pxY(z.y_cm ?? 0) - liftPx;
       const w  = (z.w_cm ?? 30) * PX_PER_CM * this._zoom;
       const h  = (z.h_cm ?? 30) * PX_PER_CM * this._zoom;
-      this._drawWall(ctx, cx, cy, w, h, z);
+      return { x: cx - w/2, y: cy - h/2, w, h };
+    });
+
+    ctx.save();
+    // Halo (outline) — sharp corners so internal seams cancel cleanly.
+    const halo = 2;
+    ctx.fillStyle = '#5C3A24';
+    for (const r of rects) {
+      ctx.fillRect(r.x - halo, r.y - halo, r.w + 2*halo, r.h + 2*halo);
     }
+    // Slab interior.
+    ctx.fillStyle = '#A0704D';
+    for (const r of rects) {
+      ctx.fillRect(r.x, r.y, r.w, r.h);
+    }
+    // Brick texture clipped to the union of all member rects.
+    ctx.save();
+    ctx.beginPath();
+    for (const r of rects) ctx.rect(r.x, r.y, r.w, r.h);
+    ctx.clip();
+    ctx.strokeStyle = 'rgba(92,58,36,0.6)';
+    ctx.lineWidth = 1.2;
+    const brickH = Math.max(8, 9 * this._zoom);
+    const brickW = brickH * 2.5;
+    const minX = Math.min(...rects.map(r => r.x));
+    const maxX = Math.max(...rects.map(r => r.x + r.w));
+    const minY = Math.min(...rects.map(r => r.y));
+    const maxY = Math.max(...rects.map(r => r.y + r.h));
+    let row = 0;
+    for (let y = maxY - brickH; y > minY; y -= brickH, row++) {
+      ctx.beginPath();
+      ctx.moveTo(minX, y); ctx.lineTo(maxX, y);
+      ctx.stroke();
+      const startX = (row % 2 === 0) ? minX + brickW / 2 : minX;
+      for (let x = startX; x < maxX; x += brickW) {
+        ctx.beginPath();
+        ctx.moveTo(x, y); ctx.lineTo(x, Math.min(y + brickH, maxY));
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+    ctx.restore();
   }
 
   // 3rd pass — beams. Drawn after the drone so when the drone flies

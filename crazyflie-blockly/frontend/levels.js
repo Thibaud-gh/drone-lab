@@ -33,7 +33,7 @@
 (function () {
   const ALL_BLOCKS = [
     'take_off', 'fly_forward', 'fly_up', 'fly_down',
-    'turn_left', 'turn_right', 'land',
+    'turn_left', 'turn_right', 'repeat_n', 'land',
   ];
 
   window.LEVELS = [
@@ -111,6 +111,80 @@
         { kind: 'target', x_cm: 150, y_cm: -150, w_cm: 25, h_cm: 25, color: 'green' },
       ],
       win: { type: 'land_in_zone', zone: 6 },
+    },
+    {
+      // L6 — introduces the loop block. Walls force a staircase path
+      // (forward, turn_right, forward, turn_left) repeated 4 times. We
+      // deliberately drop fly_up / fly_down from the palette so the kid
+      // can't bypass the walls by climbing over them — the only way
+      // through is the zig-zag, which screams "repeat me!"
+      // Solution: take_off → repeat 4 × (forward 1, turn_right,
+      //                                   forward 1, turn_left) → land.
+      id: 6,
+      caption: "Climb the staircase — the same dance, over and over",
+      palette: ['take_off', 'fly_forward', 'turn_left', 'turn_right',
+                'repeat_n', 'land'],
+      // Drone starts bottom-left of the canvas; the corridor climbs NE.
+      home_x_frac: 0.2,
+      zones: [
+        // ───────────── L6 STAIRCASE CORRIDOR ─────────────
+        //
+        //  Two thin staircase walls (12 cm thick — same as L3/L4) trace
+        //  both sides of the path corridor, offset 15 cm from it. The
+        //  two staircases meet around the target to seal it (the
+        //  corridor entry from the west is the only opening). Adjacent
+        //  segments overlap by 6 cm at each corner so the walls read
+        //  visually as continuous lines rather than disjoint sticks.
+        //
+        //  Path:  (0,0) → (0,-30) → (30,-30) → (30,-60) → (60,-60)
+        //              → (60,-90) → (90,-90) → (90,-120) → (120,-120)
+        //
+        //  Each rect is 12cm thick and 42cm long, so the long edges
+        //  EXTEND 6cm past the centre of the perpendicular neighbour —
+        //  the vertical sides of every H rect line up exactly with the
+        //  outer sides of the V rects it joins, producing clean
+        //  90° corners at each step.
+        //
+        //  Two perspective compensations are applied so the SLAB
+        //  visual gap from the path is symmetric in both directions
+        //  (≈ 20.5 cm on every side):
+        //   • Lower walls shifted +11 cm SOUTH (2× the y lift cancels
+        //     the lift's pull-up of the slab).
+        //   • Lower walls shifted +5.5 cm EAST and upper walls shifted
+        //     5.5 cm WEST so the V rects sit at ground-distance 20.5 cm
+        //     from their vertical path segment (no lift in x, so the
+        //     ground shift IS the visual shift).
+        //
+        //  ── Lower staircase (SE side of path) ──────────────────────
+        { kind: 'wall', group: 'corridor', x_cm:  20.5, y_cm:    11, w_cm: 12, h_cm: 42 },
+        { kind: 'wall', group: 'corridor', x_cm:  35.5, y_cm:    -4, w_cm: 42, h_cm: 12 },
+        { kind: 'wall', group: 'corridor', x_cm:  50.5, y_cm:   -19, w_cm: 12, h_cm: 42 },
+        { kind: 'wall', group: 'corridor', x_cm:  65.5, y_cm:   -34, w_cm: 42, h_cm: 12 },
+        { kind: 'wall', group: 'corridor', x_cm:  80.5, y_cm:   -49, w_cm: 12, h_cm: 42 },
+        { kind: 'wall', group: 'corridor', x_cm:  95.5, y_cm:   -64, w_cm: 42, h_cm: 12 },
+        { kind: 'wall', group: 'corridor', x_cm: 110.5, y_cm:   -79, w_cm: 12, h_cm: 42 },
+        { kind: 'wall', group: 'corridor', x_cm: 125.5, y_cm:   -94, w_cm: 42, h_cm: 12 },
+        // LV4 bridges the shifted LH3 to the unmoved TR around the
+        // target, so it's taller than the other V rects (h=53).
+        { kind: 'wall', group: 'corridor', x_cm: 140.5, y_cm: -114.5, w_cm: 12, h_cm: 53 },
+        //  ── Upper staircase (NW side of path) ──────────────────────
+        { kind: 'wall', group: 'corridor', x_cm: -20.5, y_cm:  -30, w_cm: 12, h_cm: 42 },
+        { kind: 'wall', group: 'corridor', x_cm:  -5.5, y_cm:  -45, w_cm: 42, h_cm: 12 },
+        { kind: 'wall', group: 'corridor', x_cm:   9.5, y_cm:  -60, w_cm: 12, h_cm: 42 },
+        { kind: 'wall', group: 'corridor', x_cm:  24.5, y_cm:  -75, w_cm: 42, h_cm: 12 },
+        { kind: 'wall', group: 'corridor', x_cm:  39.5, y_cm:  -90, w_cm: 12, h_cm: 42 },
+        { kind: 'wall', group: 'corridor', x_cm:  54.5, y_cm: -105, w_cm: 42, h_cm: 12 },
+        { kind: 'wall', group: 'corridor', x_cm:  69.5, y_cm: -120, w_cm: 12, h_cm: 42 },
+        { kind: 'wall', group: 'corridor', x_cm:  84.5, y_cm: -135, w_cm: 42, h_cm: 12 },
+        //  ── Top of the ring — joins UH4 (ends at x=105) to LV4
+        //     (north end at x=135) so the target is sealed on the
+        //     north side. Slightly wider than 30 so it overlaps both
+        //     neighbours at the corners. ────────────────────────────
+        { kind: 'wall', group: 'corridor', x_cm: 120, y_cm: -135, w_cm: 42, h_cm: 12 },
+        // Goal.
+        { kind: 'target', x_cm: 120, y_cm: -120, w_cm: 30, h_cm: 30, color: 'green' },
+      ],
+      win: { type: 'land_in_zone', zone: 18 },
     },
     {
       id: 'sandbox',

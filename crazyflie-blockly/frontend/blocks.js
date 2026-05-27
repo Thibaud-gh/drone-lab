@@ -54,6 +54,13 @@
       <path d="M22 7 L28 13 L22 19" />
     </g></svg>`);
 
+  // Circular arrow — same visual language as Blockly's built-in repeat.
+  const ICON_REPEAT = icon(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+    <g fill="none" stroke="#FFFBEE" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M7 18 A9 9 0 1 0 9 10" />
+      <path d="M4 6 L9 10 L5 15" />
+    </g></svg>`);
+
   Blockly.common.defineBlocksWithJsonArray([
     {
       type: 'take_off',
@@ -122,6 +129,25 @@
       nextStatement: null,
       style: 'flight_blocks',
       tooltip: 'turn right by a quarter (90°)',
+    },
+    {
+      // Standard repeat-N — number on the block, statement mouth for the
+      // body. Mirrors Blockly's controls_repeat but styled in our marigold
+      // logic colour and worded for a 5-yo.
+      type: 'repeat_n',
+      message0: '%1 repeat %2 times',
+      args0: [
+        { type: 'field_image', src: ICON_REPEAT, width: 22, height: 22, alt: 'repeat' },
+        { type: 'field_number', name: 'TIMES', value: 4, min: 1, max: 10, precision: 1 },
+      ],
+      message1: 'do %1',
+      args1: [
+        { type: 'input_statement', name: 'DO' },
+      ],
+      previousStatement: null,
+      nextStatement: null,
+      style: 'logic_blocks',
+      tooltip: 'do the blocks inside this one N times in a row',
     },
     {
       type: 'land',

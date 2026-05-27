@@ -877,6 +877,22 @@ body[data-mode="sim"] .sim__chip--battery { display: none; }
   width: 100%;
   white-space: nowrap;
 }
+.tile--logic {
+  --tile-bg:    #E9B44C; /* marigold — matches the logic_blocks theme */
+  --tile-edge:  #A0792C;
+  /* Sit slightly apart from the flight tiles so it's visually clear that
+     "repeat" is a different kind of block (it wraps the others). */
+  margin-top: 18px;
+}
+.tile--logic::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: -10px;
+  height: 0;
+  border-top: 2px dashed rgba(26, 42, 64, 0.4);
+}
 .tile::before {
   /* the puzzle-piece "tab" on the right, like Blockly's stack hint */
   content: "";
