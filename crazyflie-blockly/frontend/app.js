@@ -290,7 +290,8 @@
     applyPalette(lvl);
     // Fit the canvas zoom so every zone in this level is comfortably on
     // screen. Reset each time — switching levels gives the kid a fresh
-    // view regardless of how she'd zoomed the previous level.
+    // view regardless of how she'd zoomed/panned the previous level.
+    drone.setPan(0, 0);
     applyCanvasZoom(autoFitZoom(lvl));
     // Fresh workspace per level — avoids leftover blocks the new palette
     // wouldn't allow the kid to add back.
@@ -607,6 +608,29 @@
   document.getElementById('zoom-in') .addEventListener('click', () => applyCanvasZoom(drone._zoom * 1.25));
   document.getElementById('zoom-out').addEventListener('click', () => applyCanvasZoom(drone._zoom / 1.25));
   applyCanvasZoom(1.0);
+
+  // ----- Canvas pan (drag to look around) --------------------------------
+  let panActive = false;
+  let panStart  = null;
+  canvas.addEventListener('pointerdown', (e) => {
+    panActive = true;
+    panStart  = { cx: e.clientX, cy: e.clientY, px: drone._panX, py: drone._panY };
+    canvas.setPointerCapture(e.pointerId);
+    canvas.classList.add('is-panning');
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!panActive) return;
+    drone.setPan(panStart.px + (e.clientX - panStart.cx),
+                 panStart.py + (e.clientY - panStart.cy));
+  });
+  const endPan = (e) => {
+    if (!panActive) return;
+    panActive = false;
+    canvas.classList.remove('is-panning');
+    try { canvas.releasePointerCapture(e.pointerId); } catch {}
+  };
+  canvas.addEventListener('pointerup', endPan);
+  canvas.addEventListener('pointercancel', endPan);
 
   // ----- Boot ------------------------------------------------------------
   // Last thing in the IIFE so every declaration above has run before

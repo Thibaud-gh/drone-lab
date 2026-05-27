@@ -36,6 +36,8 @@ class SimDrone {
     this.ctx = canvas.getContext('2d');
     this.hud = hudEls; // { height, status, statusText, statusBox }
     this._zoom = 1.0;
+    this._panX = 0;
+    this._panY = 0;
     this.reset();
 
     this._lastT = performance.now();
@@ -71,6 +73,17 @@ class SimDrone {
   // marker stays a constant pixel size (map-marker convention).
   setZoom(z) {
     this._zoom = Math.max(0.4, Math.min(2.5, z));
+  }
+
+  // Pan offset in canvas pixels — added to the home position when
+  // converting cm → px. Lets the kid drag the canvas around.
+  setPan(x, y) {
+    this._panX = x;
+    this._panY = y;
+  }
+  panBy(dx, dy) {
+    this._panX += dx;
+    this._panY += dy;
   }
 
   stop() { this._stopped = true; }
@@ -115,10 +128,10 @@ class SimDrone {
   // ---- cm → pixel helpers --------------------------------------------
 
   _pxX(x_cm) {
-    return droneHomeXY(this.canvas).x + x_cm * PX_PER_CM * this._zoom;
+    return droneHomeXY(this.canvas).x + this._panX + x_cm * PX_PER_CM * this._zoom;
   }
   _pxY(y_cm) {
-    return droneHomeXY(this.canvas).y + y_cm * PX_PER_CM * this._zoom;
+    return droneHomeXY(this.canvas).y + this._panY + y_cm * PX_PER_CM * this._zoom;
   }
 
   // -----------------------------------------------------
@@ -314,15 +327,19 @@ class SimDrone {
 
     ctx.clearRect(0, 0, w, h);
 
-    // grid — every 30cm (same as the scale bar), so it scales with zoom
+    // grid — every 30cm (same as the scale bar), so it scales with zoom.
+    // Anchored to home + current pan so the grid drifts with the canvas
+    // when the kid drags it around.
     ctx.save();
     ctx.strokeStyle = 'rgba(26,42,64,0.07)';
     ctx.lineWidth = 1;
     const step = 30 * PX_PER_CM * this._zoom;
     const home = droneHomeXY(this.canvas);
+    const ox = ((home.x + this._panX) % step + step) % step;
+    const oy = ((home.y + this._panY) % step + step) % step;
     ctx.beginPath();
-    for (let x = home.x % step; x < w; x += step) { ctx.moveTo(x, 0); ctx.lineTo(x, h); }
-    for (let y = home.y % step; y < h; y += step) { ctx.moveTo(0, y); ctx.lineTo(w, y); }
+    for (let x = ox; x < w; x += step) { ctx.moveTo(x, 0); ctx.lineTo(x, h); }
+    for (let y = oy; y < h; y += step) { ctx.moveTo(0, y); ctx.lineTo(w, y); }
     ctx.stroke();
     ctx.restore();
 
