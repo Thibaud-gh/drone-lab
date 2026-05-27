@@ -24,10 +24,12 @@ function pluralUnits(n) {
 
 // Drone "home" — bottom-centre of the canvas in pixels. Cached on each
 // _draw call since it depends on canvas size.
-function droneHomeXY(canvas) {
+function droneHomeXY(canvas, level) {
   const w = canvas._cssW || canvas.width;
   const h = canvas._cssH || canvas.height;
-  return { x: w / 2, y: h - HOME_BOTTOM_INSET };
+  // Per-level horizontal anchor: 0 = left edge, 1 = right edge, default = centre.
+  const xFrac = (level && typeof level.home_x_frac === 'number') ? level.home_x_frac : 0.5;
+  return { x: w * xFrac, y: h - HOME_BOTTOM_INSET };
 }
 
 class SimDrone {
@@ -58,6 +60,9 @@ class SimDrone {
     // Each reset bumps the generation; in-flight tweens read this and bail
     // without writing state. This is how mid-flight reset works cleanly.
     this._gen = (this._gen ?? 0) + 1;
+    // Set of zone indices the drone has landed inside (for pickup levels).
+    // Persists across the whole flight; cleared only on reset.
+    this._pickedUpZones = new Set();
     this._setStatus('ready when you are', 'idle');
     this._updateHud();
     this._trail = [];
@@ -128,10 +133,10 @@ class SimDrone {
   // ---- cm → pixel helpers --------------------------------------------
 
   _pxX(x_cm) {
-    return droneHomeXY(this.canvas).x + this._panX + x_cm * PX_PER_CM * this._zoom;
+    return droneHomeXY(this.canvas, this._level).x + this._panX + x_cm * PX_PER_CM * this._zoom;
   }
   _pxY(y_cm) {
-    return droneHomeXY(this.canvas).y + this._panY + y_cm * PX_PER_CM * this._zoom;
+    return droneHomeXY(this.canvas, this._level).y + this._panY + y_cm * PX_PER_CM * this._zoom;
   }
 
   // -----------------------------------------------------
@@ -170,6 +175,19 @@ class SimDrone {
     if (gen !== this._gen) return;
     this.flying = false;
     this._rotorSpeed = 0;
+    // If we landed inside any pickup zone, remember it — pickup-and-deliver
+    // levels read this in evaluateWin to confirm the package was collected.
+    if (this._level?.zones?.length) {
+      this._level.zones.forEach((z, i) => {
+        if (z.kind !== 'pickup') return;
+        const hw = (z.w_cm ?? 30) / 2;
+        const hh = (z.h_cm ?? 30) / 2;
+        if (Math.abs(this.x_cm - (z.x_cm ?? 0)) <= hw &&
+            Math.abs(this.y_cm - (z.y_cm ?? 0)) <= hh) {
+          this._pickedUpZones.add(i);
+        }
+      });
+    }
   }
 
   async forward(units) {
@@ -334,7 +352,7 @@ class SimDrone {
     ctx.strokeStyle = 'rgba(26,42,64,0.07)';
     ctx.lineWidth = 1;
     const step = 30 * PX_PER_CM * this._zoom;
-    const home = droneHomeXY(this.canvas);
+    const home = droneHomeXY(this.canvas, this._level);
     const ox = ((home.x + this._panX) % step + step) % step;
     const oy = ((home.y + this._panY) % step + step) % step;
     ctx.beginPath();
@@ -417,6 +435,7 @@ class SimDrone {
       const h  = (z.h_cm ?? 30) * PX_PER_CM * this._zoom;
       const kind = z.kind || 'target';
       if      (kind === 'target') this._drawTarget(ctx, cx, cy, w, h, z);
+      else if (kind === 'pickup') this._drawPickup(ctx, cx, cy, w, h, z, this._level.zones.indexOf(z));
       else if (kind === 'wall')   this._drawWallFootprint(ctx, cx, cy, w, h);
       else if (kind === 'beam')   this._drawBeamShadow(ctx, cx, cy, w, h);
     }
@@ -459,6 +478,27 @@ class SimDrone {
     this._roundRect(ctx, cx - w/2, cy - h/2, w, h, 10);
     ctx.fill();
     ctx.stroke();
+    ctx.restore();
+  }
+
+  // Pickup zone — marigold square with a 📦 emoji. When already collected,
+  // it fades out so the kid sees the package is gone.
+  _drawPickup(ctx, cx, cy, w, h, _z, idx) {
+    const collected = idx >= 0 && this._pickedUpZones?.has(idx);
+    ctx.save();
+    ctx.globalAlpha = collected ? 0.25 : 1;
+    ctx.fillStyle = 'rgba(233,180,76,0.32)';
+    ctx.strokeStyle = '#B07A18';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 5]);
+    this._roundRect(ctx, cx - w/2, cy - h/2, w, h, 10);
+    ctx.fill();
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.font = `${Math.min(w, h) * 0.6}px "Apple Color Emoji", "Segoe UI Emoji", sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('📦', cx, cy);
     ctx.restore();
   }
 

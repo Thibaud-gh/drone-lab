@@ -265,14 +265,18 @@
     const cssH = canvas._cssH || canvas.height || 480;
     const margin = 30;
     const vAvail = Math.max(80, cssH - 70 - margin);
-    const hAvail = Math.max(80, cssW / 2 - margin);
+    // Home may be off-centre (e.g. L4's bottom-left start). Split available
+    // horizontal space into left/right halves around the home anchor so the
+    // fit considers asymmetric layouts.
+    const xFrac = (typeof level.home_x_frac === 'number') ? level.home_x_frac : 0.5;
+    const hAvailLeft = Math.max(40, cssW * xFrac - margin);
+    const hAvailRight = Math.max(40, cssW * (1 - xFrac) - margin);
     const zoomV = Math.abs(effMinY) > 0
       ? vAvail / (Math.abs(effMinY) * 3.2)
       : 1.5;
-    const halfX = Math.max(Math.abs(minX), Math.abs(maxX));
-    const zoomH = halfX > 0
-      ? hAvail / (halfX * 3.2)
-      : 1.5;
+    const zoomHLeft  = Math.abs(minX) > 0 ? hAvailLeft  / (Math.abs(minX) * 3.2) : 1.5;
+    const zoomHRight = Math.abs(maxX) > 0 ? hAvailRight / (Math.abs(maxX) * 3.2) : 1.5;
+    const zoomH = Math.min(zoomHLeft, zoomHRight);
     // Bump one step in (matches a single + press) — the bare-fit zoom
     // left more empty canvas than feels good, this seats things nicely.
     const fit = Math.min(zoomV, zoomH) * 1.25;
@@ -320,6 +324,17 @@
         return inX && inY
           ? { won: true }
           : { won: false, reason: 'you landed in the wrong area' };
+      }
+      case 'pickup_then_land': {
+        const picked = d._pickedUpZones?.has(level.win.pickup);
+        if (!picked) return { won: false, reason: "you forgot the package!" };
+        const z = level.zones[level.win.zone];
+        if (!z) return { won: true };
+        const inX = Math.abs(d.x_cm - (z.x_cm ?? 0)) <= (z.w_cm ?? 30) / 2;
+        const inY = Math.abs(d.y_cm - (z.y_cm ?? 0)) <= (z.h_cm ?? 30) / 2;
+        return inX && inY
+          ? { won: true }
+          : { won: false, reason: 'you grabbed the package but landed in the wrong area' };
       }
       default:
         return { won: true };
