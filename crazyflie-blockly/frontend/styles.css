@@ -554,6 +554,112 @@ body {
           drop-shadow(0 0 14px rgba(31, 122, 122, 0.7));
 }
 
+/* ============================================================
+   End-of-flight feedback "stamp"
+   A hand-stamped note that thunks onto the canvas when a program
+   finishes. Same physical language for both states (cream card,
+   hard ink offset, slight rotation, overshoot entry) so repeated
+   failures don't feel jarring — but WIN bursts with drawn sparkles
+   and LOSE just shakes its head once. Built in app.js.
+   ============================================================ */
+.sim__feedback {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 8;
+  pointer-events: none;   /* taps fall through to the canvas (pan + dismiss) */
+}
+.sim__feedback[data-state="win"],
+.sim__feedback[data-state="lose"] { display: flex; }
+
+.feedback-card {
+  position: relative;
+  min-width: 170px;
+  max-width: 72%;
+  padding: 17px 26px 15px;
+  background: var(--paper);
+  border: 2.5px solid var(--ink);
+  border-radius: 18px;
+  box-shadow: 0 5px 0 var(--ink);
+  text-align: center;
+  transform: rotate(-2deg);
+  animation: feedback-thunk 380ms cubic-bezier(.34, 1.56, .64, 1) both;
+}
+/* accent hairline along the top of the card */
+.feedback-card::before {
+  content: "";
+  position: absolute;
+  left: 16px; right: 16px; top: 7px;
+  height: 3px;
+  border-radius: 3px;
+  background: var(--feedback-accent, var(--logic));
+}
+/* lose: settle in, then shake the head twice */
+.sim__feedback[data-state="lose"] .feedback-card {
+  animation: feedback-thunk 380ms cubic-bezier(.34, 1.56, .64, 1) both,
+             feedback-shake 190ms ease-in-out 380ms 2;
+}
+
+.feedback-card__title {
+  font-family: var(--font-display);
+  font-size: 27px;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1.05;
+  margin: 2px 0 0;
+}
+.feedback-card__msg {
+  font-family: var(--font-body);
+  font-size: 15px;
+  color: var(--ink);
+  line-height: 1.25;
+  margin: 6px 0 0;
+}
+.feedback-card__flourish {
+  font-family: var(--font-hand);
+  font-size: 19px;
+  color: var(--feedback-accent, var(--logic));
+  margin: 3px 0 0;
+}
+
+@keyframes feedback-thunk {
+  0%   { transform: rotate(-2deg) scale(.7);  opacity: 0; }
+  60%  { transform: rotate(-2deg) scale(1.04); opacity: 1; }
+  100% { transform: rotate(-2deg) scale(1);   opacity: 1; }
+}
+@keyframes feedback-shake {
+  0%, 100% { transform: rotate(-2deg); }
+  25%      { transform: rotate(-5deg); }
+  75%      { transform: rotate(1deg); }
+}
+.sim__feedback.is-leaving .feedback-card {
+  animation: feedback-leave 280ms ease forwards;
+}
+@keyframes feedback-leave {
+  to { transform: rotate(-2deg) translateY(-7px) scale(.96); opacity: 0; }
+}
+
+/* drawn sparkle particles (win only) — spawned from card centre */
+.feedback-spark {
+  position: absolute;
+  left: 50%; top: 50%;
+  width: var(--size, 14px);
+  height: var(--size, 14px);
+  margin-left: calc(var(--size, 14px) / -2);
+  margin-top:  calc(var(--size, 14px) / -2);
+  color: var(--spark-color, var(--logic));
+  pointer-events: none;
+  animation: feedback-spark-fly var(--dur, 700ms) ease-out var(--delay, 0ms) both;
+}
+.feedback-spark svg { width: 100%; height: 100%; display: block; }
+@keyframes feedback-spark-fly {
+  0%   { transform: translate(0, 0) scale(0) rotate(0deg); opacity: 0; }
+  20%  { opacity: 1; }
+  100% { transform: translate(var(--dx), var(--dy)) scale(1) rotate(var(--rot)); opacity: 0; }
+}
+
 /* Floating per-block action toolbar (↑ ↓ ✕). Anchored to the active
    block in JS — see positionToolbar() in app.js. */
 .block-toolbar {

@@ -906,8 +906,9 @@
       drone._setStatus(msg.message, 'stopped');
     } else if (msg.op === 'done') {
       const result = evaluateWin(drone, currentLevel);
-      if (result.won) drone._setStatus('flight complete ✨', 'idle');
+      if (result.won) drone._setStatus('ready when you are', 'idle');
       else            drone._setStatus(result.reason, 'stopped');
+      showFlightFeedback(result);
     }
   });
   bridge.connect();
@@ -929,7 +930,10 @@
     // over — whether from the reset button, a level switch, mode
     // toggle, or start-over. Clean up the per-flight visuals here so
     // every one of those paths picks it up automatically.
-    if (!on) endRunVisuals();
+    if (!on) {
+      endRunVisuals();
+      clearFlightFeedback();
+    }
   }
 
   // ----- Block highlight + repeat countdown during pretend-mode runs --
@@ -1030,6 +1034,84 @@
     restoreRepeatCounts();
   }
 
+  // ----- End-of-flight feedback "stamp" ---------------------------------
+  // Shows a hand-stamped note over the canvas when a program finishes:
+  // a sparkle-burst celebration on a win, or the (forgiving) reason on
+  // a loss. Replaces the old "flight complete ✨" status-pill text — the
+  // pill now only carries in-flight progress + crash messages.
+  const feedbackEl = document.getElementById('sim-feedback');
+  let feedbackTimer = null;
+
+  const WIN_TITLES = ['you did it!', 'nailed it!', 'woohoo!', 'perfect!', 'yes!'];
+  const WIN_FLOURISHES = ['well flown ✶', 'what a pilot', 'high five!', 'magic ✦'];
+  const SPARK_COLORS = ['#E9B44C', '#7FA877', '#E76F51', '#C9486A'];
+  // 4-point sparkle + a short ink dash, drawn (not bright confetti).
+  const SPARK_SVG =
+    '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
+    '<path d="M12 1 L14 10 L23 12 L14 14 L12 23 L10 14 L1 12 L10 10 Z"/></svg>';
+
+  function clearFlightFeedback() {
+    clearTimeout(feedbackTimer);
+    feedbackTimer = null;
+    feedbackEl.classList.remove('is-leaving');
+    feedbackEl.dataset.state = 'hidden';
+    feedbackEl.replaceChildren();
+  }
+
+  function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+  function spawnSparkles(card) {
+    const N = 14;
+    for (let i = 0; i < N; i++) {
+      const span = document.createElement('span');
+      span.className = 'feedback-spark';
+      const angle = (Math.PI * 2 * i) / N + (Math.random() - 0.5) * 0.5;
+      const dist = 42 + Math.random() * 52;
+      const size = 10 + Math.random() * 8;
+      span.style.setProperty('--dx', `${Math.cos(angle) * dist}px`);
+      span.style.setProperty('--dy', `${Math.sin(angle) * dist}px`);
+      span.style.setProperty('--rot', `${(Math.random() - 0.5) * 220}deg`);
+      span.style.setProperty('--size', `${size}px`);
+      span.style.setProperty('--dur', `${620 + Math.random() * 220}ms`);
+      span.style.setProperty('--delay', `${Math.random() * 130}ms`);
+      span.style.setProperty('--spark-color', pick(SPARK_COLORS));
+      span.innerHTML = SPARK_SVG;
+      span.addEventListener('animationend', () => span.remove());
+      card.appendChild(span);
+    }
+  }
+
+  // result: { won: true } | { won: false, reason: '…' }
+  function showFlightFeedback(result) {
+    clearFlightFeedback();
+    const card = document.createElement('div');
+    card.className = 'feedback-card';
+
+    if (result.won) {
+      feedbackEl.style.setProperty('--feedback-accent', 'var(--logic)');
+      feedbackEl.dataset.state = 'win';
+      card.innerHTML =
+        `<p class="feedback-card__title">${pick(WIN_TITLES)}</p>` +
+        `<p class="feedback-card__flourish">${pick(WIN_FLOURISHES)}</p>`;
+      feedbackEl.appendChild(card);
+      spawnSparkles(card);
+      // Auto-dismiss so it doesn't block the next run.
+      feedbackTimer = setTimeout(() => {
+        feedbackEl.classList.add('is-leaving');
+        feedbackTimer = setTimeout(clearFlightFeedback, 300);
+      }, 2400);
+    } else {
+      feedbackEl.style.setProperty('--feedback-accent', 'var(--flight)');
+      feedbackEl.dataset.state = 'lose';
+      card.innerHTML =
+        `<p class="feedback-card__title">so close!</p>` +
+        `<p class="feedback-card__msg">${result.reason || "that didn't quite work"}</p>`;
+      feedbackEl.appendChild(card);
+      // Persists until the next fly!/reset (matches the persistent-error
+      // rule) — but a tap on the canvas dismisses it early.
+    }
+  }
+
   runBtn.addEventListener('click', async () => {
     if (resetMode) {
       // Mid-flight cancel: drone.reset() bumps the generation counter, so
@@ -1081,13 +1163,19 @@
         // stop button already set its own message.
       } else {
         const result = evaluateWin(drone, currentLevel);
-        if (result.won) drone._setStatus('flight complete ✨', 'idle');
+        // Win/lose now lives on the canvas stamp, not the status pill.
+        // Drop the pill back to neutral on a win (no stale "flying…"),
+        // keep the reason on the pill for a loss as a quiet secondary.
+        if (result.won) drone._setStatus('ready when you are', 'idle');
         else            drone._setStatus(result.reason, 'stopped');
+        showFlightFeedback(result);
       }
     } catch (err) {
       console.error(err);
       if (drone._gen === flightGen) {
-        drone._setStatus("hmm — that didn't work. let's try again!", 'stopped');
+        const reason = "hmm — that didn't work. let's try again!";
+        drone._setStatus(reason, 'stopped');
+        showFlightFeedback({ won: false, reason });
       }
     } finally {
       endRunVisuals();
@@ -1186,6 +1274,9 @@
   let panActive = false;
   let panStart  = null;
   canvas.addEventListener('pointerdown', (e) => {
+    // A tap also dismisses a lingering "so close!" stamp early (a win
+    // stamp auto-dismisses, so only the lose state is here).
+    if (feedbackEl.dataset.state === 'lose') clearFlightFeedback();
     panActive = true;
     panStart  = { cx: e.clientX, cy: e.clientY, px: drone._panX, py: drone._panY };
     canvas.setPointerCapture(e.pointerId);

@@ -196,6 +196,13 @@
             <span id="sim-status-text">ready when you are</span>
           </div>
 
+          <!-- End-of-flight feedback "stamp": a hand-stamped note that
+               thunks onto the canvas when a program finishes. Win = a
+               little sparkle burst; lose = the same message as the
+               status pill, just bigger and with a headshake. Content
+               built in app.js (showFlightFeedback). -->
+          <div class="sim__feedback" id="sim-feedback" data-state="hidden" aria-live="polite"></div>
+
           <div class="sim__scale" aria-hidden="true">
             <div class="sim__scale-bar"></div>
             <span class="sim__scale-label">1 unit</span>
