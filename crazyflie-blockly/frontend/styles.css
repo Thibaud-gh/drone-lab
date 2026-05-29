@@ -660,6 +660,18 @@ body {
   100% { transform: translate(var(--dx), var(--dy)) scale(1) rotate(var(--rot)); opacity: 0; }
 }
 
+/* Chunky, clearly-visible workspace scrollbars — the thin faint default
+   is invisible to a kid. Only shown when the blocks overflow (the
+   scroll-lock in app.js hides the container otherwise). */
+.blocklyScrollbarHandle {
+  fill: var(--flight) !important;   /* persimmon, matches the blocks */
+  rx: 6px; ry: 6px;
+}
+.blocklyScrollbarVertical .blocklyScrollbarHandle,
+.blocklyScrollbarHorizontal .blocklyScrollbarHandle {
+  opacity: 0.7;
+}
+
 /* Floating per-block action toolbar (↑ ↓ ✕). Anchored to the active
    block in JS — see positionToolbar() in app.js. */
 .block-toolbar {

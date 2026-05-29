@@ -431,8 +431,18 @@
     const anchor = lastActive && lastActive.workspace ? lastActive : null;
 
     if (!anchor) {
-      const off = workspace.getTopBlocks(false).length * 12;
-      newBlk.moveBy(36 + off, 36 + off);
+      // Place the first block near the TOP, slightly LEFT of centre.
+      // The view is pinned to scroll(0,0) whenever the blocks fit (see
+      // applyWorkspaceMobility), so workspace coords ≈ on-screen pixels.
+      const m = workspace.getMetrics();
+      const scale = workspace.scale || 1;
+      const hw = newBlk.getHeightWidth(); // workspace units (unscaled)
+      const viewW = (m ? m.viewWidth : 400) / scale;
+      const off = workspace.getTopBlocks(false).length * 16; // extra tops cascade
+      const targetX = Math.max(16, viewW / 2 - hw.width / 2 - 28) + off;
+      const targetY = 22 + off;
+      const cur = newBlk.getRelativeToSurfaceXY();
+      newBlk.moveBy(targetX - cur.x, targetY - cur.y);
       return;
     }
 
@@ -818,25 +828,28 @@
   function applyWorkspaceMobility() {
     const m = workspace.getMetrics();
     if (!m) return;
-    // Measure the blocks from getBlocksBoundingBox (synchronous, always
-    // current) rather than metrics.contentWidth/Height — those are
-    // recomputed on Blockly's deferred resize cycle and can read stale
-    // right after an edit. viewWidth/Height (the SVG size) are stable.
+    // Overflow is purely VERTICAL: does the block stack reach past the
+    // bottom of the visible area? Measured from getBlocksBoundingBox
+    // (synchronous, always current — metrics.contentHeight lags on
+    // Blockly's deferred resize cycle). When the blocks fit we pin the
+    // view to scroll(0,0), so the stack's workspace Y ≈ its on-screen Y
+    // and this comparison is exact.
     const scale = workspace.scale || 1;
     const hasBlocks = workspace.getTopBlocks(false).length > 0;
     const bbox = workspace.getBlocksBoundingBox();
-    const contentW = hasBlocks ? (bbox.right - bbox.left) * scale : 0;
-    const contentH = hasBlocks ? (bbox.bottom - bbox.top) * scale : 0;
-    const pad = 12; // slack so a block flush to the edge still "fits"
-    const fits = contentW <= m.viewWidth  - pad &&
-                 contentH <= m.viewHeight - pad;
-    workspace.options.moveOptions.drag = !fits;
-    if (workspace.scrollbar) workspace.scrollbar.setContainerVisible(!fits);
-    // Rescue: if we just went from overflow back to fitting, the view
-    // might still be scrolled so blocks sit off-screen with drag now
-    // disabled. Re-centre once on that transition so they're reachable.
-    if (fits && lastFits === false) workspace.scrollCenter();
-    lastFits = fits;
+    const bottomPx = hasBlocks ? bbox.bottom * scale : 0;
+    const margin = 24; // also absorbs the small SVG origin offset
+    const overflow = bottomPx > m.viewHeight - margin;
+    // Drag-pan + scrollbars come on together, only once the stack
+    // overflows. Until then the view is locked so the kid can't fling
+    // her blocks off-screen by accident.
+    workspace.options.moveOptions.drag = overflow;
+    if (workspace.scrollbar) workspace.scrollbar.setContainerVisible(overflow);
+    if (!overflow) {
+      // Keep the stack parked at the top / slightly-left-of-centre.
+      workspace.scroll(0, 0);
+    }
+    lastFits = !overflow;
   }
 
   workspace.addChangeListener((e) => {
