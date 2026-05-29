@@ -206,16 +206,23 @@
   }
 
   // ----- Block move helpers --------------------------------------------
+  // Robust "is this a statement input" check that doesn't depend on a
+  // specific Blockly enum being defined in the compressed bundle.
+  function isStatementInput(input) {
+    if (!input || !input.connection) return false;
+    if (Blockly.inputTypes && input.type === Blockly.inputTypes.STATEMENT) return true;
+    if (Blockly.NEXT_STATEMENT !== undefined && input.connection.type === Blockly.NEXT_STATEMENT) return true;
+    // Raw enum value as a final fallback.
+    return input.connection.type === 3;
+  }
   function isStatementInputConn(conn) {
-    const input = conn && conn.getParentInput && conn.getParentInput();
-    return !!(input && input.type === Blockly.inputTypes.STATEMENT);
+    if (!conn || !conn.getParentInput) return false;
+    return isStatementInput(conn.getParentInput());
   }
   function getStatementInput(block) {
     if (!block || !block.inputList) return null;
     for (const input of block.inputList) {
-      if (input.connection && input.type === Blockly.inputTypes.STATEMENT) {
-        return input;
-      }
+      if (isStatementInput(input)) return input;
     }
     return null;
   }
@@ -232,27 +239,53 @@
   }
 
   function canMoveUp(block) {
-    // Both connectors required — the move re-uses block's nextConnection
-    // to splice it back in above its old neighbour. A starter (no
-    // previousConnection) and a terminator (no nextConnection) therefore
-    // can't be moved by the toolbar; they're locked to chain ends.
-    if (!block || !block.previousConnection || !block.nextConnection) return false;
+    if (!block || !block.previousConnection) return false;
     const prevConn = block.previousConnection.targetConnection;
     if (!prevConn) return false;          // free-floating, nothing above
-    if (isStatementInputConn(prevConn)) return true;  // first in body — can exit
+    if (isStatementInputConn(prevConn)) {
+      // First in a body — exiting upward inserts block before the
+      // container in the parent chain. That requires nextConnection.
+      return !!block.nextConnection;
+    }
     const prevBlock = prevConn.getSourceBlock();
-    if (!prevBlock.previousConnection) return false;  // prev is a starter, can't swap past
-    return true;
+    if (!prevBlock.previousConnection) return false;  // can't swap past a starter
+    if (getStatementInput(prevBlock)) {
+      // Diving INTO the bottom of a repeat — block becomes the body's
+      // last block. Only needs previousConnection (already checked).
+      return true;
+    }
+    // Plain swap with the block above — both connectors required.
+    return !!block.nextConnection;
   }
   function canMoveDown(block) {
-    if (!block || !block.previousConnection || !block.nextConnection) return false;
+    if (!block || !block.nextConnection) return false;
     const nextBlock = block.getNextBlock();
     if (!nextBlock) {
-      // End of chain — only movable if inside a body (then it exits the body).
-      return findContainingBlock(block) !== null;
+      // At end of a body — exit downward needs previousConnection (to
+      // connect to the container's nextConnection). If the container
+      // has its own next block in the parent chain, we also need
+      // block's nextConnection so that block can be spliced in
+      // BETWEEN container and that next block without orphaning it.
+      const container = findContainingBlock(block);
+      if (!container) return false;
+      if (!block.previousConnection) return false;
+      const afterContainer = container.getNextBlock();
+      if (afterContainer && !block.nextConnection) return false;
+      return true;
+    }
+    const stmt = getStatementInput(nextBlock);
+    if (stmt) {
+      // Diving INTO the top of a repeat — block becomes the body's
+      // first block. Always needs previousConnection. If the body
+      // already has a first block, we also need nextConnection so the
+      // existing block stays linked behind us rather than orphaned.
+      if (!block.previousConnection) return false;
+      const bodyHasFirst = !!stmt.connection.targetBlock();
+      if (bodyHasFirst && !block.nextConnection) return false;
+      return true;
     }
     if (!nextBlock.nextConnection) return false;     // next is a terminator
-    return true;
+    return !!block.previousConnection;
   }
 
   function moveBlockUp(block) {
