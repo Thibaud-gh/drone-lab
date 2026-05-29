@@ -505,10 +505,10 @@ body {
   position: absolute;
   z-index: 1;
   pointer-events: none;
-  top: 50%;
-  right: 18px;
-  width: min(54%, 200px);
-  transform: translateY(-50%);
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(70%, 240px);
   text-align: center;
   color: var(--ink-soft);
   opacity: 1;
