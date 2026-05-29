@@ -903,6 +903,109 @@
     resetMode = on;
     runBtn.classList.toggle('btn--reset', on);
     runLabel.textContent = on ? 'reset' : 'fly!';
+    // Flipping back to "fly!" is the single signal that a flight is
+    // over — whether from the reset button, a level switch, mode
+    // toggle, or start-over. Clean up the per-flight visuals here so
+    // every one of those paths picks it up automatically.
+    if (!on) endRunVisuals();
+  }
+
+  // ----- Block highlight + repeat countdown during pretend-mode runs --
+  // The JS generator injects `highlightBlock(<id>)` before each
+  // statement (via STATEMENT_PREFIX) and `setRepeatCount(<id>, n)`
+  // inside each repeat loop. The kid sees:
+  //   • the block currently being animated glow brightly,
+  //   • the repeat block's number field count down 4 → 3 → 2 → 1 → 0.
+  // We snapshot every repeat block's original count at the start of a
+  // run so we can restore them at the end (or on reset). Field writes
+  // are wrapped in Blockly.Events.disable / enable so the live code
+  // panel doesn't regenerate Python with the decrementing values.
+  let currentHighlightedBlock = null;
+  const originalRepeatCounts = new Map();
+
+  // The glow uses a CLONE of the highlighted block's SVG, appended at
+  // the end of the workspace canvas — drawing the cloned block (and
+  // its drop-shadow halo) on top of everything else. We can't just put
+  // the filter on the original block: Blockly nests stacked blocks as
+  // DOM descendants, so a child block in the same chain would always
+  // render *after* (above) the highlighted block, clipping the lower
+  // half of the glow. The overlay sidesteps that ordering entirely.
+  let highlightOverlay = null;
+  function ensureHighlightOverlay() {
+    const canvas = workspace.getCanvas();
+    if (!highlightOverlay || highlightOverlay.parentNode !== canvas) {
+      highlightOverlay = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      highlightOverlay.setAttribute('class', 'drone-running-overlay');
+      highlightOverlay.style.pointerEvents = 'none';
+      canvas.appendChild(highlightOverlay);
+    } else if (canvas.lastChild !== highlightOverlay) {
+      // New blocks may have been appended after us — re-park on top.
+      canvas.appendChild(highlightOverlay);
+    }
+    return highlightOverlay;
+  }
+  function highlightBlock(id) {
+    // Tight loops (e.g. `repeat 4 × forward`) hit STATEMENT_PREFIX with
+    // the same id every iteration. Bail early so we don't redo the
+    // clone work on every statement.
+    if (currentHighlightedBlock && currentHighlightedBlock.id === id) return;
+    const overlay = ensureHighlightOverlay();
+    overlay.replaceChildren();
+    currentHighlightedBlock = null;
+    if (!id) return;
+    const block = workspace.getBlockById(id);
+    if (!block) return;
+    const root = block.getSvgRoot?.();
+    if (!root) return;
+    const clone = root.cloneNode(true);
+    // Strip any nested blocks from the clone — we only want THIS
+    // block's visual on the overlay, not its chain-next or body.
+    clone.querySelectorAll('.blocklyDraggable').forEach(b => b.remove());
+    // Detach the clone from Blockly's bookkeeping: without this Blockly
+    // sees a node with a known `data-id` + `blocklyDraggable` class
+    // sitting in the canvas and keeps re-asserting the original
+    // block's transform on it, snapping the clone back to (0, 0)
+    // relative to its old parent.
+    clone.removeAttribute('data-id');
+    clone.querySelectorAll('[data-id]').forEach(el => el.removeAttribute('data-id'));
+    clone.classList.remove('blocklyDraggable');
+    clone.setAttribute('class', (clone.getAttribute('class') || '') + ' drone-running-clone');
+    // Re-position in the canvas's coord space (the clone has lost its
+    // original DOM-nesting context, so its transform is now relative
+    // to the canvas root rather than its old parent block).
+    const xy = block.getRelativeToSurfaceXY();
+    clone.setAttribute('transform', `translate(${xy.x}, ${xy.y})`);
+    overlay.appendChild(clone);
+    currentHighlightedBlock = block;
+  }
+  function setRepeatCount(blockId, count) {
+    const block = workspace.getBlockById(blockId);
+    if (!block) return;
+    Blockly.Events.disable();
+    try { block.setFieldValue(count, 'TIMES'); }
+    finally { Blockly.Events.enable(); }
+  }
+  // NOTE: this snapshot/restore is intentionally `repeat_n`-shaped. If
+  // we ever add another block whose field gets mutated during a run
+  // (e.g. a future "wait N seconds" counter), generalise this into a
+  // per-block "transient field" registry rather than copying.
+  function snapshotRepeatCounts() {
+    originalRepeatCounts.clear();
+    for (const b of workspace.getAllBlocks(true)) {
+      if (b.type === 'repeat_n') {
+        originalRepeatCounts.set(b.id, b.getFieldValue('TIMES'));
+      }
+    }
+  }
+  function restoreRepeatCounts() {
+    for (const [id, count] of originalRepeatCounts) {
+      setRepeatCount(id, count);
+    }
+    originalRepeatCounts.clear();
+  }
+  function endRunVisuals() {
+    highlightBlock(null);
+    restoreRepeatCounts();
   }
 
   runBtn.addEventListener('click', async () => {
@@ -911,7 +1014,7 @@
       // any in-flight tween bails on its next frame without writing more
       // state. Trail clears as part of reset.
       drone.reset();
-      setResetMode(false);
+      setResetMode(false);     // also clears per-flight visuals (see setResetMode)
       return;
     }
 
@@ -935,16 +1038,22 @@
 
     drone.reset();
     setResetMode(true);   // flip immediately so the kid can abort any time
+    snapshotRepeatCounts();  // restore these later, no matter how the run ends
     const flightGen = drone._gen;
     await wait(120);
 
     try {
-      // Loop blocks reference `flightGen` to bail out the moment the kid
-      // hits reset mid-flight — see the repeat_n JS generator.
-      const fn = new Function('drone', 'flightGen', `return (async () => {\n${code}\n})();`);
-      await fn(drone, flightGen);
-      // If the kid pressed reset mid-flight, drone._gen has moved on.
-      // Reset already set status to "ready when you are"; don't overwrite.
+      // Helpers injected into the generated wrapper:
+      //   flightGen        — sentinel so loops bail on mid-flight reset
+      //   highlightBlock   — wired in by STATEMENT_PREFIX, lights up the
+      //                      block currently being executed
+      //   setRepeatCount   — called by the repeat_n generator to tick the
+      //                      "N times" field down per iteration
+      const fn = new Function(
+        'drone', 'flightGen', 'highlightBlock', 'setRepeatCount',
+        `return (async () => {\n${code}\n})();`,
+      );
+      await fn(drone, flightGen, highlightBlock, setRepeatCount);
       if (drone._gen !== flightGen) return;
       if (drone._stopped) {
         // stop button already set its own message.
@@ -958,6 +1067,8 @@
       if (drone._gen === flightGen) {
         drone._setStatus("hmm — that didn't work. let's try again!", 'stopped');
       }
+    } finally {
+      endRunVisuals();
     }
   });
 

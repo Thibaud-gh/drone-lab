@@ -68,16 +68,28 @@
   };
   // Repeat loop — break out the moment the kid hits reset mid-flight so
   // subsequent iterations don't keep running against the freshly-reset
-  // drone. `flightGen` is captured in app.js when the run starts and
-  // injected as a parameter to the generated async wrapper.
+  // drone. Inside the loop we also call setRepeatCount() with the
+  // iterations remaining so the kid sees the number on the repeat
+  // block tick down: 4 → 3 → 2 → 1 → 0. `flightGen` /
+  // `setRepeatCount` / `highlightBlock` are injected as parameters of
+  // the generated async wrapper (see app.js).
   js.forBlock['repeat_n'] = (block) => {
     const n = block.getFieldValue('TIMES');
+    const idLit = JSON.stringify(block.id);
     const body = js.statementToCode(block, 'DO');
     return (
       `for (let i = 0; i < ${n}; i++) {\n` +
       `  if (drone._gen !== flightGen) break;\n` +
+      `  setRepeatCount(${idLit}, ${n} - i);\n` +
       `${body}` +
-      `}\n`
+      `}\n` +
+      `setRepeatCount(${idLit}, 0);\n`
     );
   };
+
+  // Inject a highlight call before every statement block. The kid sees
+  // each block "light up" in sync with what the drone is doing on the
+  // canvas. The replacement happens at code-generation time —
+  // STATEMENT_PREFIX swaps `%1` for the block's quoted id.
+  js.STATEMENT_PREFIX = 'highlightBlock(%1);\n';
 })();

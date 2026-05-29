@@ -542,6 +542,18 @@ body {
 /* Soft marigold glow on the "active" block — the anchor for the next click-insert */
 .drone-active { filter: drop-shadow(0 0 8px rgba(240,169,59,0.85)); }
 
+/* Peacock-teal halo on the block currently being executed during a
+   pretend-mode flight. The glow is rendered on a CLONE of the block's
+   SVG that lives at the end of the workspace canvas (see
+   ensureHighlightOverlay in app.js), so the halo always sits on top
+   of every other block — Blockly's DOM nesting would otherwise let
+   later blocks in the chain clip the lower half of the glow. */
+.drone-running-overlay { pointer-events: none; }
+.drone-running-clone {
+  filter: drop-shadow(0 0 6px rgba(31, 122, 122, 0.95))
+          drop-shadow(0 0 14px rgba(31, 122, 122, 0.7));
+}
+
 /* Floating per-block action toolbar (↑ ↓ ✕). Anchored to the active
    block in JS — see positionToolbar() in app.js. */
 .block-toolbar {
