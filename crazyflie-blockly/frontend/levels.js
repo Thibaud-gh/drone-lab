@@ -117,7 +117,34 @@
       win: { type: 'land_in_zone', zone: 6 },
     },
     {
-      // L6 — gentle intro to the loop block. Three packages plus the
+      // L6 — open-ended "many paths" puzzle, before the loop levels.
+      // Drone starts bottom-left. The green landing area is directly
+      // ahead (north). Two packages: one bottom-right, one top-right.
+      // A short 2-unit-high wall sits 1/3 of the way between the start
+      // and the bottom-right package, blocking the naive straight-east
+      // route. The kid can fly OVER it (up 2), go AROUND its short
+      // ends, or skip it entirely by grabbing the top-right package
+      // first and dropping down to the bottom one. No single intended
+      // solution — the point is to notice there are several.
+      id: 6,
+      caption: "Fetch both packages, then land up top — there are lots of ways to get there!",
+      // Two pickups + a final landing → *_loop flight variants.
+      palette: ['take_off_loop', 'fly_forward', 'fly_up', 'fly_down',
+                'turn_left', 'turn_right', 'land_loop'],
+      home_x_frac: 0.2,
+      zones: [
+        { kind: 'pickup', x_cm: 120, y_cm:    0, w_cm: 25, h_cm: 25 },   // bottom-right
+        { kind: 'pickup', x_cm: 120, y_cm: -120, w_cm: 25, h_cm: 25 },   // top-right
+        // Short wall, height 2 (clear by flying above 60 cm), 1/3 of the
+        // way to the bottom-right package, just long enough to block the
+        // straight shot but easy to round at either end.
+        { kind: 'wall', x_cm: 40, y_cm: 0, w_cm: 12, h_cm: 60, over_height_cm: 60 },
+        { kind: 'target', x_cm: 0, y_cm: -120, w_cm: 28, h_cm: 28, color: 'green' },
+      ],
+      win: { type: 'pickup_then_land', pickup: [0, 1], zone: 3 },
+    },
+    {
+      // L7 — gentle intro to the loop block. Three packages plus the
       // green landing area in a straight line ahead of the drone, one
       // unit apart. Each "hop" is exactly the same dance: take off →
       // forward 1 → land. Four hops in a row is the obvious place for
@@ -126,7 +153,7 @@
       // Solution: repeat 4 × (take_off, forward 1, land).
       //   With the loop:  4 visible blocks.
       //   Without:       12 blocks (the same trio four times).
-      id: 6,
+      id: 7,
       caption: "Grab every package on the way — same hop, again and again. Can repeat help?",
       // Four landings (3 pickups + delivery) → uses *_loop variants so
       // take_off / land can live inside the repeat body.
@@ -140,14 +167,14 @@
       win: { type: 'pickup_then_land', pickup: [0, 1, 2], zone: 3 },
     },
     {
-      // L7 — introduces the loop block in earnest. Walls force a
+      // L8 — introduces the loop block in earnest. Walls force a
       // staircase path (forward, turn_right, forward, turn_left)
       // repeated 4 times. We deliberately drop fly_up / fly_down from
       // the palette so the kid can't bypass the walls by climbing over
       // them — the only way through is the zig-zag.
       // Solution: take_off → repeat 4 × (forward 1, turn_right,
       //                                   forward 1, turn_left) → land.
-      id: 7,
+      id: 8,
       caption: "Climb the staircase — the same dance, over and over",
       palette: ['take_off', 'fly_forward', 'turn_left', 'turn_right',
                 'repeat_n', 'land'],
