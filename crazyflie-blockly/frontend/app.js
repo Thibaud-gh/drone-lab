@@ -198,6 +198,7 @@
       Blockly.Events.setGroup(false);
     }
     refreshCode();
+    updateWorkspaceMobility();   // reorder can shift the bounding box
     setTimeout(() => {
       setLastActive(block);
       focusFirstNumberField(block);
@@ -541,6 +542,10 @@
   // canvas size.
   new ResizeObserver(() => { fitCanvas(canvas); })
     .observe(canvas.parentElement);
+  // Re-evaluate workspace scroll-locking when the layout / browser zoom
+  // changes the available space (rAF so Blockly resizes its SVG first).
+  new ResizeObserver(() => requestAnimationFrame(updateWorkspaceMobility))
+    .observe(host);
 
   const drone = new SimDrone(canvas, hud);
 
@@ -698,9 +703,12 @@
     // the kid had built on this level before (if anything).
     workspace.clear();
     setLastActive(null);
+    // New level → re-evaluate fit from a clean slate (a restore below may
+    // flip it again). Reset lastFits so the rescue-recenter can fire.
+    lastFits = null;
     restoreWorkspaceForLevel(id);
     refreshCode();
-    updateHintVisibility();
+    updateHintVisibility();   // also re-evaluates scroll-lock mobility
     // mark active tab — compare as strings so 'sandbox' matches
     tabsEl.querySelectorAll('.level-tab').forEach(b => {
       b.classList.toggle('is-active', b.dataset.level === String(id));
@@ -771,6 +779,12 @@
   function updateHintVisibility() {
     const hasBlocks = workspace.getAllBlocks(false).length > 0;
     host.classList.toggle('has-blocks', hasBlocks);
+    // The app's own block ops (palette insert, delete, clear) call
+    // refreshCode/updateHintVisibility directly rather than going through
+    // the workspace change listener (they run inside an event group), so
+    // hook the scroll-lock re-evaluation here — it fires from every
+    // block-structure change.
+    updateWorkspaceMobility();
   }
 
   let persistTimer = null;
@@ -783,6 +797,48 @@
     internalRearrange = false;
     rearrangeTargetBlock = null;
   }
+  // ----- Lock the workspace view when the blocks already fit ------------
+  // Blockly pads the scrollable area far past the content, so by default
+  // you can always drag/scroll into empty space — which lets a kid pan
+  // her blocks clean off-screen by accident. We only want scrolling when
+  // the blocks genuinely don't fit (a tall stack, or the browser zoomed
+  // in). When everything fits: disable background drag-pan + hide the
+  // scrollbars; when it overflows: turn them back on. Block dragging
+  // itself is unaffected (that's a separate gesture).
+  let lastFits = null;
+  let mobilityTimer = 0;
+  // Debounced: Blockly recomputes its content metrics on a deferred
+  // resize cycle, so a synchronous getMetrics() right after a block
+  // edit can read stale dimensions. Wait for things to settle, then
+  // measure once.
+  function updateWorkspaceMobility() {
+    clearTimeout(mobilityTimer);
+    mobilityTimer = setTimeout(applyWorkspaceMobility, 60);
+  }
+  function applyWorkspaceMobility() {
+    const m = workspace.getMetrics();
+    if (!m) return;
+    // Measure the blocks from getBlocksBoundingBox (synchronous, always
+    // current) rather than metrics.contentWidth/Height — those are
+    // recomputed on Blockly's deferred resize cycle and can read stale
+    // right after an edit. viewWidth/Height (the SVG size) are stable.
+    const scale = workspace.scale || 1;
+    const hasBlocks = workspace.getTopBlocks(false).length > 0;
+    const bbox = workspace.getBlocksBoundingBox();
+    const contentW = hasBlocks ? (bbox.right - bbox.left) * scale : 0;
+    const contentH = hasBlocks ? (bbox.bottom - bbox.top) * scale : 0;
+    const pad = 12; // slack so a block flush to the edge still "fits"
+    const fits = contentW <= m.viewWidth  - pad &&
+                 contentH <= m.viewHeight - pad;
+    workspace.options.moveOptions.drag = !fits;
+    if (workspace.scrollbar) workspace.scrollbar.setContainerVisible(!fits);
+    // Rescue: if we just went from overflow back to fitting, the view
+    // might still be scrolled so blocks sit off-screen with drag now
+    // disabled. Re-centre once on that transition so they're reachable.
+    if (fits && lastFits === false) workspace.scrollCenter();
+    lastFits = fits;
+  }
+
   workspace.addChangeListener((e) => {
     // Anchor tracking — fire on UI events too (SELECTED is a UI event)
     if (e.type === Blockly.Events.SELECTED && e.newElementId) {
@@ -813,10 +869,14 @@
       if (!e.isStart) requestAnimationFrame(positionToolbar);
     } else if (e.type === Blockly.Events.VIEWPORT_CHANGE) {
       positionToolbar();
+      // Wheel-zooming the workspace can push content over/under the fit
+      // threshold; re-evaluate. (scrollCenter only fires on the
+      // overflow→fits edge, so this can't loop.)
+      updateWorkspaceMobility();
     }
     if (e.isUiEvent) return;
     refreshCode();
-    updateHintVisibility();
+    updateHintVisibility();   // also re-evaluates scroll-lock mobility
     // Persist this level's blocks (debounced) so a page reload mid-build
     // doesn't lose work between explicit level switches.
     if (currentLevel) {
