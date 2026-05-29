@@ -542,6 +542,54 @@ body {
 /* Soft marigold glow on the "active" block — the anchor for the next click-insert */
 .drone-active { filter: drop-shadow(0 0 8px rgba(240,169,59,0.85)); }
 
+/* Floating per-block action toolbar (↑ ↓ ✕). Anchored to the active
+   block in JS — see positionToolbar() in app.js. */
+.block-toolbar {
+  position: absolute;
+  display: none;
+  flex-direction: row;
+  gap: 6px;
+  z-index: 6;
+  pointer-events: none;
+}
+.block-toolbar.is-visible { display: flex; pointer-events: auto; }
+.block-tool {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: #FFFBEE;
+  border: 2px solid var(--ink);
+  cursor: pointer;
+  font-family: var(--font-body);
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--ink);
+  box-shadow: 0 2px 0 var(--ink);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: transform 100ms ease, box-shadow 100ms ease, opacity 100ms ease;
+}
+.block-tool:hover  { transform: translateY(-1px); box-shadow: 0 3px 0 var(--ink); }
+.block-tool:active { transform: translateY(2px);  box-shadow: 0 0 0 var(--ink); }
+.block-tool.is-disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+.block-tool--delete {
+  background: #F5C9C0;
+  color: #8B2A1C;
+  border-color: #8B2A1C;
+  box-shadow: 0 2px 0 #8B2A1C;
+}
+.block-tool--delete:hover  { box-shadow: 0 3px 0 #8B2A1C; }
+.block-tool--delete:active { box-shadow: 0 0 0 #8B2A1C; }
+/* Hide the toolbar entirely while the kid is dragging a block — otherwise
+   it floats stale over the drag preview. JS toggles this class. */
+.block-toolbar.is-hidden { display: none; }
+
 /* Workspace drop-feedback when a palette tile is being dragged over */
 .blockly-host.drag-over { box-shadow: inset 0 0 0 3px rgba(240,169,59,0.7); }
 .blockly-host.drag-over::after {

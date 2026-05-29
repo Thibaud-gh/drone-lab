@@ -126,6 +126,19 @@
             <p class="workspace-hint__sub">stack more to make a flight plan</p>
           </div>
 
+          <!-- Floating action toolbar that follows the active block.
+               Three buttons let the kid reorder or delete without a
+               sustained drag (which a 5-yo's motor skills can struggle
+               with). Shown only when a block is active. -->
+          <div id="block-toolbar" class="block-toolbar" aria-hidden="true">
+            <button type="button" class="block-tool" data-action="up"
+                    title="move up" aria-label="move up">↑</button>
+            <button type="button" class="block-tool" data-action="down"
+                    title="move down" aria-label="move down">↓</button>
+            <button type="button" class="block-tool block-tool--delete"
+                    data-action="delete" title="delete" aria-label="delete">✕</button>
+          </div>
+
           <!-- Bigger custom trashcan. Blockly's built-in trashcan is hidden
                visually (still functional as a safety net) and this overlay
                sits on top with its own drag-end hit detection. -->

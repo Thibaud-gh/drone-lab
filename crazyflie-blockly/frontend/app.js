@@ -86,6 +86,286 @@
       const root = lastActive.getSvgRoot?.();
       if (root) root.classList.add('drone-active');
     }
+    positionToolbar();
+  }
+
+  // ----- Floating per-block toolbar (↑ ↓ ✕) -----------------------------
+  // Lets the kid reorder or delete the active block by tapping a small
+  // button instead of having to sustain a drag (hard at 5-yo motor
+  // skill). Up/Down arrows swap with the neighbour; if the neighbour
+  // is a repeat block, the active block dives INTO or out of its body
+  // step-by-step. Buttons grey out at the chain extremities or next to
+  // a starter/terminator block.
+  const toolbarEl = document.getElementById('block-toolbar');
+  const toolbarUpBtn     = toolbarEl.querySelector('[data-action="up"]');
+  const toolbarDownBtn   = toolbarEl.querySelector('[data-action="down"]');
+  const toolbarDeleteBtn = toolbarEl.querySelector('[data-action="delete"]');
+
+  toolbarEl.addEventListener('click', (e) => {
+    const btn = e.target.closest('.block-tool');
+    if (!btn || btn.classList.contains('is-disabled')) return;
+    if (!lastActive || !lastActive.workspace) return;
+    const action = btn.dataset.action;
+    if      (action === 'delete') deleteActiveBlock();
+    else if (action === 'up')     moveActiveBlock('up');
+    else if (action === 'down')   moveActiveBlock('down');
+  });
+
+  function positionToolbar() {
+    if (!lastActive || !lastActive.workspace) {
+      toolbarEl.classList.remove('is-visible');
+      return;
+    }
+    const root = lastActive.getSvgRoot?.();
+    if (!root) {
+      toolbarEl.classList.remove('is-visible');
+      return;
+    }
+    const rect     = root.getBoundingClientRect();
+    const hostRect = host.getBoundingClientRect();
+    toolbarEl.classList.add('is-visible');
+    // Anchor to the top-right corner of the block, nudged 8px outward.
+    toolbarEl.style.left = `${rect.right - hostRect.left + 8}px`;
+    toolbarEl.style.top  = `${rect.top   - hostRect.top}px`;
+    updateToolbarButtons();
+  }
+
+  function updateToolbarButtons() {
+    toolbarUpBtn.classList.toggle('is-disabled', !canMoveUp(lastActive));
+    toolbarDownBtn.classList.toggle('is-disabled', !canMoveDown(lastActive));
+  }
+
+  function deleteActiveBlock() {
+    if (!lastActive || !lastActive.workspace) return;
+    // Capture neighbours BEFORE disposing so we can pick a sensible
+    // anchor for the kid's next click-to-insert (otherwise the next
+    // block lands stranded at top-left of the workspace).
+    const nextNeighbour = lastActive.getNextBlock();
+    const prevNeighbour = lastActive.getPreviousBlock();
+    Blockly.Events.setGroup(true);
+    try {
+      lastActive.dispose(true /* heal stack */);
+    } finally {
+      Blockly.Events.setGroup(false);
+    }
+    // Prefer NEXT over PREV: when the deleted block was first in a
+    // repeat body, getPreviousBlock() returns the enclosing repeat,
+    // which would anchor follow-up inserts OUTSIDE the body — wrong.
+    // The next block (now the body's new first block) is the right
+    // anchor instead.
+    let replacement = (nextNeighbour && nextNeighbour.workspace) ? nextNeighbour : null;
+    if (!replacement && prevNeighbour && prevNeighbour.workspace) replacement = prevNeighbour;
+    if (!replacement) {
+      // No neighbours — fall back to the bottom of any remaining top
+      // stack so click-to-insert still appends instead of starting
+      // fresh in a corner.
+      const tops = workspace.getTopBlocks(true);
+      if (tops.length) {
+        let bottom = tops[0];
+        while (bottom.getNextBlock()) bottom = bottom.getNextBlock();
+        replacement = bottom;
+      }
+    }
+    setLastActive(replacement);
+    refreshCode();
+    updateHintVisibility();
+  }
+
+  function moveActiveBlock(dir) {
+    const block = lastActive;
+    if (!block || !block.workspace) return;
+    // Block the change listener's BLOCK_MOVE → setLastActive logic for
+    // the duration of this programmatic move. Blockly fires a
+    // BLOCK_MOVE for every block whose position shifted (often two or
+    // three during a swap) AND defers them via setTimeout(0), so a
+    // plain post-move setLastActive(block) gets clobbered as soon as
+    // the deferred events fire. The flag stays true past those events
+    // (reset on a setTimeout(0) of its own, which queues *after* the
+    // event firings) so the kid's clicked block keeps the focus.
+    // Lock focus to the block the kid just acted on. Blockly fires
+    // multiple BLOCK_MOVE events for the swap AND for late layout
+    // updates (e.g. when the number editor opens) — without a sticky
+    // lock the listener would chase the LAST moved block and the
+    // toolbar would slide off to the neighbour. The lock is cleared
+    // on the next user-driven SELECTED / BLOCK_DRAG event.
+    internalRearrange = true;
+    rearrangeTargetBlock = block;
+    Blockly.Events.setGroup(true);
+    try {
+      if (dir === 'up') moveBlockUp(block);
+      else              moveBlockDown(block);
+    } finally {
+      Blockly.Events.setGroup(false);
+    }
+    refreshCode();
+    setTimeout(() => {
+      setLastActive(block);
+      focusFirstNumberField(block);
+      requestAnimationFrame(positionToolbar);
+    }, 0);
+  }
+
+  // ----- Block move helpers --------------------------------------------
+  function isStatementInputConn(conn) {
+    const input = conn && conn.getParentInput && conn.getParentInput();
+    return !!(input && input.type === Blockly.inputTypes.STATEMENT);
+  }
+  function getStatementInput(block) {
+    if (!block || !block.inputList) return null;
+    for (const input of block.inputList) {
+      if (input.connection && input.type === Blockly.inputTypes.STATEMENT) {
+        return input;
+      }
+    }
+    return null;
+  }
+  function findContainingBlock(block) {
+    // Walks up the chain to the FIRST block in its body, then returns
+    // the parent block (the one whose statement input we live in).
+    let top = block;
+    while (true) {
+      const prevConn = top.previousConnection && top.previousConnection.targetConnection;
+      if (!prevConn) return null;
+      if (isStatementInputConn(prevConn)) return prevConn.getSourceBlock();
+      top = prevConn.getSourceBlock();
+    }
+  }
+
+  function canMoveUp(block) {
+    // Both connectors required — the move re-uses block's nextConnection
+    // to splice it back in above its old neighbour. A starter (no
+    // previousConnection) and a terminator (no nextConnection) therefore
+    // can't be moved by the toolbar; they're locked to chain ends.
+    if (!block || !block.previousConnection || !block.nextConnection) return false;
+    const prevConn = block.previousConnection.targetConnection;
+    if (!prevConn) return false;          // free-floating, nothing above
+    if (isStatementInputConn(prevConn)) return true;  // first in body — can exit
+    const prevBlock = prevConn.getSourceBlock();
+    if (!prevBlock.previousConnection) return false;  // prev is a starter, can't swap past
+    return true;
+  }
+  function canMoveDown(block) {
+    if (!block || !block.previousConnection || !block.nextConnection) return false;
+    const nextBlock = block.getNextBlock();
+    if (!nextBlock) {
+      // End of chain — only movable if inside a body (then it exits the body).
+      return findContainingBlock(block) !== null;
+    }
+    if (!nextBlock.nextConnection) return false;     // next is a terminator
+    return true;
+  }
+
+  function moveBlockUp(block) {
+    if (!canMoveUp(block)) return;
+    const prevConn  = block.previousConnection.targetConnection;
+    const prevBlock = prevConn.getSourceBlock();
+    if (isStatementInputConn(prevConn)) {
+      // First in a body — exit upward, become previous sibling of the container.
+      moveBlockBefore(block, prevBlock);
+      return;
+    }
+    const stmt = getStatementInput(prevBlock);
+    if (stmt) {
+      // prevBlock is a repeat-like container — dive INTO the bottom of its body.
+      moveBlockToEndOfInput(block, stmt);
+      return;
+    }
+    // Plain swap with the block above.
+    swapBlocks(block, prevBlock);
+  }
+  function moveBlockDown(block) {
+    if (!canMoveDown(block)) return;
+    const nextBlock = block.getNextBlock();
+    if (!nextBlock) {
+      // At end of a body — exit downward, become next sibling of the container.
+      const container = findContainingBlock(block);
+      if (container) moveBlockAfter(block, container);
+      return;
+    }
+    const stmt = getStatementInput(nextBlock);
+    if (stmt) {
+      // nextBlock is a repeat-like container — dive INTO the top of its body.
+      moveBlockToStartOfInput(block, stmt);
+      return;
+    }
+    // Plain swap with the block below (block goes under nextBlock).
+    swapBlocks(nextBlock, block);
+  }
+
+  // Insert `block` immediately before `target` in target's chain.
+  function moveBlockBefore(block, target) {
+    if (!target.previousConnection) return;
+    const aboveConn = target.previousConnection.targetConnection;
+    block.unplug(true);
+    if (aboveConn) aboveConn.disconnect();
+    if (block.nextConnection) block.nextConnection.connect(target.previousConnection);
+    if (aboveConn) aboveConn.connect(block.previousConnection);
+  }
+  // Insert `block` immediately after `target` in target's chain.
+  function moveBlockAfter(block, target) {
+    if (!target.nextConnection) return;
+    const next     = target.getNextBlock();
+    const nextConn = target.nextConnection.targetConnection;
+    block.unplug(true);
+    if (nextConn) nextConn.disconnect();
+    target.nextConnection.connect(block.previousConnection);
+    if (next && block.nextConnection) {
+      block.nextConnection.connect(next.previousConnection);
+    }
+  }
+  // Drop `block` at the bottom of `input`'s body.
+  function moveBlockToEndOfInput(block, input) {
+    let last = input.connection.targetBlock();
+    if (last) {
+      while (last.getNextBlock()) last = last.getNextBlock();
+    }
+    block.unplug(true);
+    if (last && last.nextConnection) {
+      last.nextConnection.connect(block.previousConnection);
+    } else {
+      input.connection.connect(block.previousConnection);
+    }
+  }
+  // Drop `block` at the top of `input`'s body (the rest of the body
+  // shifts down).
+  function moveBlockToStartOfInput(block, input) {
+    const first = input.connection.targetBlock();
+    block.unplug(true);
+    if (first) {
+      input.connection.disconnect();
+      input.connection.connect(block.previousConnection);
+      if (block.nextConnection) {
+        block.nextConnection.connect(first.previousConnection);
+      }
+    } else {
+      input.connection.connect(block.previousConnection);
+    }
+  }
+  // Swap two adjacent blocks. `lower` is initially below `upper`; after
+  // this call they trade positions (lower is above, upper is below).
+  function swapBlocks(lower, upper) {
+    const aboveConn = upper.previousConnection.targetConnection;
+    lower.unplug(true);   // heal: upper now connects to lower's old tail
+    if (upper.previousConnection.isConnected()) {
+      upper.previousConnection.disconnect();
+    }
+    if (aboveConn) aboveConn.connect(lower.previousConnection);
+    if (lower.nextConnection) lower.nextConnection.connect(upper.previousConnection);
+  }
+
+  // ----- Auto-focus number field on insert / move -----------------------
+  function focusFirstNumberField(block) {
+    if (!block || !block.workspace) return;
+    for (const input of block.inputList) {
+      for (const field of input.fieldRow) {
+        if (field instanceof Blockly.FieldNumber) {
+          // Public API in v11; falls back to the protected method if not exposed.
+          if (typeof field.showEditor === 'function') field.showEditor();
+          else if (typeof field.showEditor_ === 'function') field.showEditor_();
+          return;
+        }
+      }
+    }
   }
 
   function insertBlock(type) {
@@ -102,6 +382,9 @@
     setLastActive(newBlk);
     refreshCode();
     updateHintVisibility();
+    // Open the inline number editor if the inserted block has one,
+    // so the kid can type a value right away without a second tap.
+    setTimeout(() => focusFirstNumberField(newBlk), 0);
   }
 
   // Choose where a freshly-created block goes:
@@ -177,6 +460,7 @@
     setLastActive(newBlk);
     refreshCode();
     updateHintVisibility();
+    setTimeout(() => focusFirstNumberField(newBlk), 0);
   }
 
   function clientToWorkspace(clientX, clientY) {
@@ -435,18 +719,45 @@
   }
 
   let persistTimer = null;
+  // While a programmatic move is in flight (and for its long tail of
+  // late BLOCK_MOVE events), keep focus pinned to the block the kid
+  // acted on. The lock is cleared by the next user-driven action.
+  let internalRearrange = false;
+  let rearrangeTargetBlock = null;
+  function endRearrangeLock() {
+    internalRearrange = false;
+    rearrangeTargetBlock = null;
+  }
   workspace.addChangeListener((e) => {
     // Anchor tracking — fire on UI events too (SELECTED is a UI event)
     if (e.type === Blockly.Events.SELECTED && e.newElementId) {
+      // User clicked a block. If it's different from our rearrange
+      // target, the kid has moved on and we should release the lock.
+      if (rearrangeTargetBlock && e.newElementId !== rearrangeTargetBlock.id) {
+        endRearrangeLock();
+      }
       const blk = workspace.getBlockById(e.newElementId);
       if (blk) setLastActive(blk);
     } else if (e.type === Blockly.Events.BLOCK_MOVE && e.blockId) {
-      const blk = workspace.getBlockById(e.blockId);
-      if (blk) setLastActive(blk);
+      if (internalRearrange && rearrangeTargetBlock && rearrangeTargetBlock.workspace) {
+        // Late event from the rearrange — force focus back to the
+        // block the kid acted on, regardless of which block Blockly
+        // happens to report moved.
+        setLastActive(rearrangeTargetBlock);
+      } else {
+        const blk = workspace.getBlockById(e.blockId);
+        if (blk) setLastActive(blk);
+      }
     } else if (e.type === Blockly.Events.BLOCK_DELETE && lastActive && lastActive.id === e.blockId) {
       setLastActive(null);
     } else if (e.type === Blockly.Events.BLOCK_DRAG) {
+      // User started a real drag — release the rearrange lock.
+      if (e.isStart) endRearrangeLock();
       handleBlockDrag(e);
+      toolbarEl.classList.toggle('is-hidden', !!e.isStart);
+      if (!e.isStart) requestAnimationFrame(positionToolbar);
+    } else if (e.type === Blockly.Events.VIEWPORT_CHANGE) {
+      positionToolbar();
     }
     if (e.isUiEvent) return;
     refreshCode();
