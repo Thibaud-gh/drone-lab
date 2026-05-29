@@ -246,6 +246,9 @@ class SimDrone {
       return;
     }
     const cm = units * CM_PER_UNIT;
+    // Going down far enough to reach the floor is a crash — only `land`
+    // brings the drone safely to the ground.
+    const hitsFloor = this.height - cm <= 0;
     const target = Math.max(0, this.height - cm);
     this._setStatus(`going down ${pluralUnits(units)}`, 'flying');
     this._rotorSpeed = 24;
@@ -254,6 +257,10 @@ class SimDrone {
       this._checkCrash();
     });
     if (gen !== this._gen) return;
+    if (hitsFloor && !this._lastError) {
+      this._fail('crash! the drone fell to the floor — use land to come down gently!');
+      return;
+    }
     this._rotorSpeed = 20;
   }
 
@@ -407,9 +414,9 @@ class SimDrone {
     // we're actually lifted, otherwise it just looks like a stray line
     if (lift > 6) {
       ctx.save();
-      ctx.strokeStyle = 'rgba(26,42,64,0.22)';
-      ctx.lineWidth = 1.4;
-      ctx.setLineDash([3, 4]);
+      ctx.strokeStyle = 'rgba(231,111,81,0.6)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 3]);
       ctx.beginPath();
       ctx.moveTo(px, py_ground - 2);
       ctx.lineTo(px, py_drone + 16 * this._zoom);
@@ -417,12 +424,17 @@ class SimDrone {
       ctx.restore();
     }
 
-    // 3. Drone marker.
+    // 3. Beams the drone is NOT under — drawn before it so the drone
+    //    (the star) stays visible up high instead of vanishing behind a
+    //    beam it hasn't reached.
+    this._drawBeams(ctx, false);
+
+    // 4. Drone marker.
     this._drawDrone(ctx, px, py_drone);
 
-    // 4. Beams — drawn after the drone so when the drone flies UNDER,
-    //    the beam visually occludes it (it's above).
-    this._drawBeams(ctx);
+    // 5. Beams the drone is genuinely flying UNDER — drawn after it so
+    //    the beam occludes the drone (it's above). See _beamOccludesDrone.
+    this._drawBeams(ctx, true);
 
     if (this.height > 1) this._drawHeightBadge(ctx, px, py_drone);
   }
@@ -440,10 +452,7 @@ class SimDrone {
       const kind = z.kind || 'target';
       if      (kind === 'target') this._drawTarget(ctx, cx, cy, w, h, z);
       else if (kind === 'pickup') this._drawPickup(ctx, cx, cy, w, h, z, this._level.zones.indexOf(z));
-      // Grouped walls suppress their per-rect dashed footprint — the
-      // merged slab carries the visual on its own.
-      else if (kind === 'wall' && !z.group)  this._drawWallFootprint(ctx, cx, cy, w, h);
-      else if (kind === 'beam')              this._drawBeamShadow(ctx, cx, cy, w, h);
+      else if (kind === 'beam')   this._drawBeamShadow(ctx, cx, cy, w, h);
     }
   }
 
@@ -544,12 +553,45 @@ class SimDrone {
     ctx.restore();
   }
 
-  // 3rd pass — beams. Drawn after the drone so when the drone flies
-  // UNDER the beam, the beam visually occludes the drone (it's above).
-  _drawBeams(ctx) {
+  // True when the beam should paint over the drone. Purely a draw-order
+  // cue — the crash rule lives in _checkCrash and is left untouched.
+  //
+  // Two conditions:
+  //  1. the drone is below the beam's underside (at/above it → always on
+  //     top; default 60 matches _checkCrash);
+  //  2. the drone's icon actually overlaps the lifted slab ON SCREEN.
+  // We test screen overlap, not the world footprint, because the slab is
+  // drawn high up (lifted by the beam's height) and is far thinner than
+  // the drone is tall — a footprint test flips occlusion while their
+  // pixels still overlap, popping the drone on top mid-pass. Pixel overlap
+  // flips exactly at the slab's edge, so the hand-off is seamless.
+  _beamOccludesDrone(z) {
+    if (this.height >= (z.under_height_cm ?? 60)) return false;
+    const zoom = this._zoom;
+    const altRatio = Math.min(1, this.height / 80);
+    const dr = 36 * (1 + altRatio * 0.18) * zoom;        // drone icon half-extent
+    const px = this._pxX(this.x_cm);
+    const py = this._pxY(this.y_cm) - this.height * ALTITUDE_PX_PER_CM * zoom;
+    const cx = this._pxX(z.x_cm ?? 0);
+    // Slab geometry mirrors _drawBeam (note its `?? 30` default lift).
+    const liftPx = ((z.under_height_cm ?? 30) * ALTITUDE_PX_PER_CM + 14) * zoom;
+    const ySlab  = this._pxY(z.y_cm ?? 0) - liftPx;
+    const halfW  = (z.w_cm ?? 30) * PX_PER_CM * zoom / 2;
+    const halfH  = (z.h_cm ?? 30) * PX_PER_CM * zoom / 2;
+    return Math.abs(px - cx) <= halfW + dr &&
+           Math.abs(py - ySlab) <= halfH + dr;
+  }
+
+  // 3rd pass — beams. Drawn around the drone so when it flies UNDER a
+  // beam, the beam visually occludes the drone (it's above), but a beam
+  // the drone hasn't reached doesn't paint over it up high.
+  // `inFront` selects which layer to draw: false = beams behind the drone,
+  // true = beams that occlude it (the ones it's genuinely flying under).
+  _drawBeams(ctx, inFront) {
     if (!this._level || !this._level.zones?.length) return;
     for (const z of this._level.zones) {
       if (z.kind !== 'beam') continue;
+      if (this._beamOccludesDrone(z) !== inFront) continue;
       const cx = this._pxX(z.x_cm ?? 0);
       const cy = this._pxY(z.y_cm ?? 0);
       const w  = (z.w_cm ?? 30) * PX_PER_CM * this._zoom;
@@ -591,20 +633,6 @@ class SimDrone {
     ctx.restore();
   }
 
-  // Faint dashed rectangle on the floor showing where the wall stands.
-  // The brick body (in _drawWall) overlaps this on the canvas — the
-  // visible part is just enough to hint at the wall's footprint.
-  _drawWallFootprint(ctx, cx, cy, w, h) {
-    ctx.save();
-    ctx.strokeStyle = 'rgba(26,42,64,0.30)';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([3, 4]);
-    this._roundRect(ctx, cx - w/2, cy - h/2, w, h, 3);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.restore();
-  }
-
   // Beam casts a shadow on the floor at its world position. Drawn in
   // the floor pass so trail + drone paint over it naturally.
   _drawBeamShadow(ctx, cx, cy, w, h) {
@@ -617,30 +645,12 @@ class SimDrone {
   }
 
   // Wall body = a brick slab at the wall's height, mirroring the beam
-  // visually (same thickness, just a different texture + label). The
-  // dashed footprint on the floor (drawn in the floor pass) plus
-  // dashed "post" lines from the footprint sides up to the slab
-  // anchor it to the ground.
+  // visually (same thickness, just a different texture + label).
   _drawWall(ctx, cx, cy, w, h, z) {
     const heightCm = z.over_height_cm ?? 30;
     const liftPx   = heightCm * ALTITUDE_PX_PER_CM * this._zoom;
     const units    = +(heightCm / CM_PER_UNIT).toFixed(1);
     const ySlabMid = cy - liftPx;
-
-    // dashed "posts" from footprint side edges up to the slab sides —
-    // says "this wall stands on the floor and reaches up to here"
-    ctx.save();
-    ctx.strokeStyle = 'rgba(92,58,36,0.55)';
-    ctx.lineWidth = 1.2;
-    ctx.setLineDash([3, 4]);
-    ctx.beginPath();
-    ctx.moveTo(cx - w/2, cy);
-    ctx.lineTo(cx - w/2, ySlabMid);
-    ctx.moveTo(cx + w/2, cy);
-    ctx.lineTo(cx + w/2, ySlabMid);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.restore();
 
     // brick slab at altitude
     ctx.save();
