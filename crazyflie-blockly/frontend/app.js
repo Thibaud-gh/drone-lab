@@ -1099,7 +1099,7 @@
       feedbackEl.style.setProperty('--feedback-accent', 'var(--flight)');
       feedbackEl.dataset.state = 'lose';
       card.innerHTML =
-        `<p class="feedback-card__title">so close!</p>` +
+        `<p class="feedback-card__title">${result.title || 'so close!'}</p>` +
         `<p class="feedback-card__msg">${result.reason || "that didn't quite work"}</p>`;
       feedbackEl.appendChild(card);
     }
@@ -1109,6 +1109,11 @@
   }
 
   runBtn.addEventListener('click', async () => {
+    // Any button press clears a lingering stamp first, so a previous
+    // result (or the empty-plan nudge below) never bleeds into the
+    // next run.
+    clearFlightFeedback();
+
     if (resetMode) {
       // Mid-flight cancel: drone.reset() bumps the generation counter, so
       // any in-flight tween bails on its next frame without writing more
@@ -1118,10 +1123,13 @@
       return;
     }
 
+    const emptyPlan = { won: false, title: 'oops!',
+      reason: 'your flight plan is empty — add some blocks first!' };
+
     if (currentMode === 'real') {
       const pyCode = pyGen.workspaceToCode(workspace);
       if (!pyCode.trim()) {
-        flash(hud.statusBox, 'add some blocks first!');
+        showFlightFeedback(emptyPlan);
         return;
       }
       drone.reset();
@@ -1132,7 +1140,7 @@
     // pretend mode — run the JS-generated code against the in-browser sim
     const code = jsGen.workspaceToCode(workspace);
     if (!code.trim()) {
-      flash(hud.statusBox, 'add some blocks first!');
+      showFlightFeedback(emptyPlan);
       return;
     }
 
@@ -1242,16 +1250,6 @@
   }
 
   function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-  function flash(el, text) {
-    const prev = document.getElementById('sim-status-text').textContent;
-    document.getElementById('sim-status-text').textContent = text;
-    setTimeout(() => {
-      if (document.getElementById('sim-status-text').textContent === text) {
-        document.getElementById('sim-status-text').textContent = prev;
-      }
-    }, 2400);
-  }
 
   // ----- Canvas zoom -----------------------------------------------------
   // Two sources of truth that have to stay in sync: drone._zoom (drives
