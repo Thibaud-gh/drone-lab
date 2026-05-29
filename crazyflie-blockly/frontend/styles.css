@@ -904,11 +904,15 @@ body {
 body[data-mode="sim"] .sim__chip--battery { display: none; }
 
 .sim__status {
+  /* Hidden: the end-of-flight feedback stamp now carries win/lose, and
+     the drone animation conveys in-flight progress. `_setStatus` still
+     writes here harmlessly (kept for potential real-drone use), it's
+     just not shown. */
+  display: none;
   position: absolute;
   bottom: 14px;
   left: 14px;
   z-index: 3;
-  display: inline-flex;
   align-items: center;
   gap: 8px;
   padding: 7px 14px;

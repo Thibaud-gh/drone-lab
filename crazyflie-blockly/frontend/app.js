@@ -1095,11 +1095,6 @@
         `<p class="feedback-card__flourish">${pick(WIN_FLOURISHES)}</p>`;
       feedbackEl.appendChild(card);
       spawnSparkles(card);
-      // Auto-dismiss so it doesn't block the next run.
-      feedbackTimer = setTimeout(() => {
-        feedbackEl.classList.add('is-leaving');
-        feedbackTimer = setTimeout(clearFlightFeedback, 300);
-      }, 2400);
     } else {
       feedbackEl.style.setProperty('--feedback-accent', 'var(--flight)');
       feedbackEl.dataset.state = 'lose';
@@ -1107,9 +1102,10 @@
         `<p class="feedback-card__title">so close!</p>` +
         `<p class="feedback-card__msg">${result.reason || "that didn't quite work"}</p>`;
       feedbackEl.appendChild(card);
-      // Persists until the next fly!/reset (matches the persistent-error
-      // rule) — but a tap on the canvas dismisses it early.
     }
+    // Both states persist until the next fly!/reset (matches the
+    // persistent-error rule) — or until a tap on the canvas dismisses
+    // the stamp early.
   }
 
   runBtn.addEventListener('click', async () => {
@@ -1274,9 +1270,8 @@
   let panActive = false;
   let panStart  = null;
   canvas.addEventListener('pointerdown', (e) => {
-    // A tap also dismisses a lingering "so close!" stamp early (a win
-    // stamp auto-dismisses, so only the lose state is here).
-    if (feedbackEl.dataset.state === 'lose') clearFlightFeedback();
+    // A tap dismisses a lingering feedback stamp (win or lose).
+    if (feedbackEl.dataset.state !== 'hidden') clearFlightFeedback();
     panActive = true;
     panStart  = { cx: e.clientX, cy: e.clientY, px: drone._panX, py: drone._panY };
     canvas.setPointerCapture(e.pointerId);
