@@ -619,8 +619,13 @@
   // ===== Per-level workspace persistence ========================
   // Each level has its own slot in localStorage so the kid can hop
   // between levels without losing her work — and surviving a page
-  // reload too. Saved/restored as Blockly's JSON serialization.
+  // reload too. Saved/restored as Blockly's JSON serialization, with
+  // the workspace scroll offset stored alongside so panning sticks
+  // per-level too. `drone_lab.lastLevel` remembers which tab she was
+  // on so a refresh lands where she left off.
   const WORKSPACE_STORAGE_PREFIX = 'drone_lab.workspace.';
+  const SCROLL_STORAGE_PREFIX    = 'drone_lab.scroll.';
+  const LAST_LEVEL_KEY           = 'drone_lab.lastLevel';
 
   function persistWorkspaceForLevel(levelId) {
     try {
@@ -630,6 +635,12 @@
         const state = Blockly.serialization.workspaces.save(workspace);
         localStorage.setItem(WORKSPACE_STORAGE_PREFIX + levelId, JSON.stringify(state));
       }
+      // Always persist scroll, even when the workspace is empty — she
+      // may have panned around before placing any blocks.
+      localStorage.setItem(
+        SCROLL_STORAGE_PREFIX + levelId,
+        JSON.stringify({ x: workspace.scrollX || 0, y: workspace.scrollY || 0 }),
+      );
     } catch (_) {
       // localStorage can be unavailable (private mode, quota). Silent —
       // not critical to gameplay.
@@ -639,17 +650,25 @@
   function restoreWorkspaceForLevel(levelId) {
     try {
       const raw = localStorage.getItem(WORKSPACE_STORAGE_PREFIX + levelId);
-      if (!raw) return;
-      Blockly.serialization.workspaces.load(JSON.parse(raw), workspace);
-      // Re-anchor click-to-insert at the bottom of the first chain so
-      // the kid can keep appending right where she left off.
-      const tops = workspace.getTopBlocks(true);
-      if (tops.length) {
-        let bottom = tops[0];
-        while (bottom.nextConnection?.targetBlock()) {
-          bottom = bottom.nextConnection.targetBlock();
+      if (raw) {
+        Blockly.serialization.workspaces.load(JSON.parse(raw), workspace);
+        // Re-anchor click-to-insert at the bottom of the first chain so
+        // the kid can keep appending right where she left off.
+        const tops = workspace.getTopBlocks(true);
+        if (tops.length) {
+          let bottom = tops[0];
+          while (bottom.nextConnection?.targetBlock()) {
+            bottom = bottom.nextConnection.targetBlock();
+          }
+          setLastActive(bottom);
         }
-        setLastActive(bottom);
+      }
+      const scrollRaw = localStorage.getItem(SCROLL_STORAGE_PREFIX + levelId);
+      if (scrollRaw) {
+        const { x, y } = JSON.parse(scrollRaw);
+        if (typeof workspace.scroll === 'function') workspace.scroll(x, y);
+      } else {
+        if (typeof workspace.scroll === 'function') workspace.scroll(0, 0);
       }
     } catch (_) { /* corrupted slot — fall through to empty workspace */ }
   }
@@ -657,11 +676,14 @@
   function setLevel(id) {
     const lvl = LEVELS.find(l => l.id === id);
     if (!lvl) return;
-    // Stash the previous level's blocks before we swap them out.
+    // Stash the previous level's blocks (and scroll) before we swap.
     if (currentLevel && currentLevel.id !== id) {
       persistWorkspaceForLevel(currentLevel.id);
     }
     currentLevel = lvl;
+    // Remember which level we're on so a page reload lands us back
+    // here instead of dropping the kid back at L1.
+    try { localStorage.setItem(LAST_LEVEL_KEY, String(id)); } catch (_) {}
     captionEl.textContent = lvl.caption;
     drone.setLevel(lvl);
     drone.reset();
@@ -1193,5 +1215,16 @@
   // Last thing in the IIFE so every declaration above has run before
   // setLevel(0) calls setResetMode(false) (which reads `let resetMode`).
   buildLevelTabs();
-  setLevel(1);
+  // If the kid was on a particular level last session, drop her back
+  // there. Level ids are numbers (1, 2, …) or the literal 'sandbox'.
+  let initialLevelId = 1;
+  try {
+    const stored = localStorage.getItem(LAST_LEVEL_KEY);
+    if (stored !== null) {
+      const asNum = Number(stored);
+      const candidate = Number.isFinite(asNum) && String(asNum) === stored ? asNum : stored;
+      if (LEVELS.some(l => l.id === candidate)) initialLevelId = candidate;
+    }
+  } catch (_) {}
+  setLevel(initialLevelId);
 })();
