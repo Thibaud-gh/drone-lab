@@ -47,8 +47,11 @@
   const workspace = Blockly.inject(host, {
     theme: window.DRONE_THEME,
     renderer: 'zelos',
-    move: { scrollbars: true, drag: true, wheel: true },
-    zoom: { controls: false, wheel: true, startScale: 1.0, minScale: 0.6, maxScale: 1.6, scaleSpeed: 1.1 },
+    // drag + wheel start OFF and are enabled only on vertical overflow
+    // (see applyWorkspaceMobility). zoom.wheel stays off entirely —
+    // accidental two-finger pinch shouldn't shrink the kid's blocks.
+    move: { scrollbars: true, drag: false, wheel: false },
+    zoom: { controls: false, wheel: false, startScale: 1.0, minScale: 0.6, maxScale: 1.6, scaleSpeed: 1.1 },
     grid: { spacing: 24, length: 0.5, colour: 'rgba(26,42,64,0.10)', snap: false },
     trashcan: true,
     sounds: false,
@@ -840,10 +843,14 @@
     const bottomPx = hasBlocks ? bbox.bottom * scale : 0;
     const margin = 24; // also absorbs the small SVG origin offset
     const overflow = bottomPx > m.viewHeight - margin;
-    // Drag-pan + scrollbars come on together, only once the stack
-    // overflows. Until then the view is locked so the kid can't fling
-    // her blocks off-screen by accident.
+    // Drag-pan, wheel-scroll (two-finger trackpad) and scrollbars come
+    // on together, only once the stack overflows. Until then the view is
+    // fully locked so the kid can't fling her blocks off-screen by
+    // accident — by mouse drag OR trackpad swipe. zoom.wheel stays off
+    // throughout so a stray pinch never resizes the blocks.
     workspace.options.moveOptions.drag = overflow;
+    workspace.options.moveOptions.wheel = overflow;
+    workspace.options.zoomOptions.wheel = false;
     if (workspace.scrollbar) workspace.scrollbar.setContainerVisible(overflow);
     if (!overflow) {
       // Keep the stack parked at the top / slightly-left-of-centre.
