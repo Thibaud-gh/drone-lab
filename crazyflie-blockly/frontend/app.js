@@ -53,7 +53,7 @@
     move: { scrollbars: true, drag: false, wheel: false },
     zoom: { controls: false, wheel: false, startScale: 1.0, minScale: 0.6, maxScale: 1.6, scaleSpeed: 1.1 },
     grid: { spacing: 24, length: 0.5, colour: 'rgba(26,42,64,0.10)', snap: false },
-    trashcan: true,
+    trashcan: false,   // deletion is via the per-block ✕ button, no bin
     sounds: false,
   });
 
@@ -882,9 +882,9 @@
     } else if (e.type === Blockly.Events.BLOCK_DELETE && lastActive && lastActive.id === e.blockId) {
       setLastActive(null);
     } else if (e.type === Blockly.Events.BLOCK_DRAG) {
-      // User started a real drag — release the rearrange lock.
+      // User started a real drag — release the rearrange lock and hide
+      // the floating toolbar so it doesn't trail the drag preview.
       if (e.isStart) endRearrangeLock();
-      handleBlockDrag(e);
       toolbarEl.classList.toggle('is-hidden', !!e.isStart);
       if (!e.isStart) requestAnimationFrame(positionToolbar);
     } else if (e.type === Blockly.Events.VIEWPORT_CHANGE) {
@@ -905,39 +905,8 @@
     }
   });
 
-  // ----- Custom big-bin: drop a block here to delete --------------------
-  const bigbin = document.getElementById('bigbin');
-  let draggingBlock = null;
-  let lastPointer = { x: 0, y: 0 };
-
-  document.addEventListener('pointermove', (e) => {
-    lastPointer.x = e.clientX;
-    lastPointer.y = e.clientY;
-    if (draggingBlock) {
-      bigbin.classList.toggle('is-target', isOverBigbin(e.clientX, e.clientY));
-    }
-  });
-
-  function handleBlockDrag(e) {
-    if (e.isStart) {
-      draggingBlock = workspace.getBlockById(e.blockId);
-    } else {
-      const blk = draggingBlock;
-      draggingBlock = null;
-      bigbin.classList.remove('is-target');
-      // Block may already be disposed (Blockly's own trashcan caught it).
-      // Guard on .workspace; dispose with healStack=true so children reattach
-      // to the parent's nextConnection rather than being orphaned.
-      if (blk && blk.workspace && isOverBigbin(lastPointer.x, lastPointer.y)) {
-        blk.dispose(true, true);
-      }
-    }
-  }
-
-  function isOverBigbin(x, y) {
-    const r = bigbin.getBoundingClientRect();
-    return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
-  }
+  // Deletion is handled by the per-block ✕ toolbar button (see
+  // deleteActiveBlock); there's no drop-bin any more.
 
   // DOM safety net for programmatic creations that skip events
   new MutationObserver(updateHintVisibility).observe(

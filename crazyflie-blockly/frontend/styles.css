@@ -738,49 +738,6 @@ body {
   z-index: 4;
 }
 
-/* Hide Blockly's default trashcan visually — keeps positioning and lid
-   behaviour intact (still acts as a safety-net hit zone). The bigger
-   custom .bigbin overlay below provides the user-facing bin.
-   !important because Blockly sets inline opacity:0.4 on the SVG group. */
-.blocklyTrash { opacity: 0 !important; }
-
-/* -----------------------------------------------------------
-   Custom big trashcan overlay
-   ----------------------------------------------------------- */
-
-.bigbin {
-  position: absolute;
-  right: 10px;
-  bottom: 14px;
-  width: 110px;
-  z-index: 4;
-  pointer-events: none; /* never block workspace events */
-  text-align: center;
-  transition: transform 200ms ease, filter 200ms ease;
-}
-.bigbin__svg { width: 100%; display: block; overflow: visible; }
-.bigbin__lid {
-  transform-origin: 18% 100%;
-  transition: transform 240ms cubic-bezier(.2,.7,.3,1.05);
-}
-.bigbin__hint {
-  display: inline-block;
-  margin-top: 2px;
-  font-family: var(--font-hand);
-  font-size: 13px;
-  line-height: 1.05;
-  color: var(--ink-soft);
-  opacity: 0.75;
-}
-.bigbin.is-target {
-  transform: scale(1.07);
-  filter: drop-shadow(0 4px 12px rgba(208,69,67,0.35));
-}
-.bigbin.is-target .bigbin__lid {
-  transform: rotate(-28deg) translateY(-2px);
-}
-.bigbin.is-target .bigbin__body { fill: #FBE9CF; }
-
 @keyframes hint-in {
   from { opacity: 0; transform: translateY(-46%); }
   to   { opacity: 1; transform: translateY(-50%); }
