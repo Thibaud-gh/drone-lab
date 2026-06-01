@@ -61,6 +61,28 @@
       <path d="M4 6 L9 10 L5 15" />
     </g></svg>`);
 
+  // Forward arrow stopping at a bar — "fly forward until …".
+  const ICON_UNTIL = icon(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+    <g fill="none" stroke="#FFFBEE" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4 16 L19 16" />
+      <path d="M13 10 L19 16 L13 22" />
+      <path d="M25 7 L25 25" />
+    </g></svg>`);
+
+  // Little brick wall — the "wall ahead" sensor.
+  const ICON_WALLAHEAD = icon(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+    <g fill="none" stroke="#FFFBEE" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="6" y="11" width="20" height="14" rx="1.5" />
+      <path d="M6 18 L26 18 M13 11 L13 18 M19 18 L19 25 M13 25 L13 18" />
+    </g></svg>`);
+
+  // Dashed trail to a flag — the "gone N units" travelled-distance sensor.
+  const ICON_GONE = icon(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+    <g fill="none" stroke="#FFFBEE" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4 24 L22 24" stroke-dasharray="3 3.5" />
+      <path d="M22 24 L22 8 L29 11 L22 14" />
+    </g></svg>`);
+
   // take_off and land each come in TWO shapes:
   //   • take_off / land  — starter + terminator. Match the
   //     "one flight, one landing" feel of L1, L2, L4, L5, L7.
@@ -168,6 +190,48 @@
       nextStatement: null,
       style: 'logic_blocks',
       tooltip: 'do the blocks inside this one N times in a row',
+    },
+    {
+      // First REACTIVE block: fly forward and keep going until the
+      // plugged-in condition becomes true. The condition is a separate
+      // sage block dropped into the slot (wall_ahead / gone_units).
+      type: 'fly_until',
+      message0: '%1 fly forward until %2',
+      args0: [
+        { type: 'field_image', src: ICON_UNTIL, width: 22, height: 22, alt: 'fly until' },
+        { type: 'input_value', name: 'COND', check: 'Boolean' },
+      ],
+      inputsInline: true,
+      previousStatement: null,
+      nextStatement: null,
+      style: 'flight_blocks',
+      tooltip: 'fly forward until the condition is true',
+    },
+    {
+      // Sensor condition: is there a wall close in front? (front
+      // Multi-ranger on the real drone; ray-cast in the sim.)
+      type: 'wall_ahead',
+      message0: '%1 wall ahead',
+      args0: [
+        { type: 'field_image', src: ICON_WALLAHEAD, width: 22, height: 22, alt: 'wall ahead' },
+      ],
+      output: 'Boolean',
+      style: 'sensor_blocks',
+      tooltip: 'true when a wall is close in front of the drone',
+    },
+    {
+      // Travelled-distance condition: true once the drone has gone N
+      // units during this "fly forward until". (The loop keeps flying
+      // while the travelled distance is still below the threshold.)
+      type: 'gone_units',
+      message0: '%1 gone %2 units',
+      args0: [
+        { type: 'field_image', src: ICON_GONE, width: 22, height: 22, alt: 'gone' },
+        { type: 'field_number', name: 'UNITS', value: 3, min: 1, max: 10, precision: 1 },
+      ],
+      output: 'Boolean',
+      style: 'sensor_blocks',
+      tooltip: 'true once the drone has travelled this many units',
     },
     {
       type: 'land',

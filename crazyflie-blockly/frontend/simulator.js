@@ -17,9 +17,35 @@ const CM_PER_UNIT = 30;             // 1 unit (kid-facing) = 30 cm in the world
 const HOME_BOTTOM_INSET = 70;       // px from canvas bottom edge where the drone sits at home
 const ALTITUDE_PX_PER_CM = 52 / 90; // shared between drone-lift and obstacle perspective
 const DRONE_RADIUS_CM = 8;          // for collision — crash when the drone's edge meets the obstacle's edge
+const WALL_AHEAD_CM = 25;           // "wall ahead" trips when a wall is this close in front
+const UNTIL_MAX_UNITS = 12;         // safety cap so "fly until" never runs forever
 
 function pluralUnits(n) {
   return n === 1 ? '1 unit' : `${n} units`;
+}
+
+// Ray vs axis-aligned box. Origin (ox,oy), unit direction (dx,dy), box
+// [minX..maxX]×[minY..maxY]. Returns the forward distance to the first
+// hit (≥ 0), or null if the ray misses. (dx,dy) must be unit length so
+// the returned t is a distance in the same units as the coords.
+function rayBoxDistance(ox, oy, dx, dy, minX, maxX, minY, maxY) {
+  let tmin = -Infinity, tmax = Infinity;
+  if (Math.abs(dx) < 1e-9) {
+    if (ox < minX || ox > maxX) return null;
+  } else {
+    let t1 = (minX - ox) / dx, t2 = (maxX - ox) / dx;
+    if (t1 > t2) { const s = t1; t1 = t2; t2 = s; }
+    tmin = Math.max(tmin, t1); tmax = Math.min(tmax, t2);
+  }
+  if (Math.abs(dy) < 1e-9) {
+    if (oy < minY || oy > maxY) return null;
+  } else {
+    let t1 = (minY - oy) / dy, t2 = (maxY - oy) / dy;
+    if (t1 > t2) { const s = t1; t1 = t2; t2 = s; }
+    tmin = Math.max(tmin, t1); tmax = Math.min(tmax, t2);
+  }
+  if (tmax < tmin || tmax < 0) return null;
+  return tmin >= 0 ? tmin : 0;
 }
 
 // Drone "home" — bottom-centre of the canvas in pixels. Cached on each
@@ -67,6 +93,7 @@ class SimDrone {
     // Set of zone indices the drone has landed inside (for pickup levels).
     // Persists across the whole flight; cleared only on reset.
     this._pickedUpZones = new Set();
+    this._untilStart = null;   // origin of the current fly-until (for distanceGone)
     this._setStatus('ready when you are', 'idle');
     this._updateHud();
     this._trail = [];
@@ -217,6 +244,77 @@ class SimDrone {
       if (this._trail.length > 2000) this._trail.shift();
     });
     if (gen !== this._gen) return;
+    this._rotorSpeed = 20;
+  }
+
+  // ---- Reactive flight + sensors -------------------------------------
+
+  // Distance (cm) the drone has travelled since the current fly-until
+  // started — kid-facing units. Used by the gone_units condition.
+  distanceGone() {
+    if (this._untilStart == null) return 0;
+    return Math.hypot(this.x_cm - this._untilStart.x, this.y_cm - this._untilStart.y) / CM_PER_UNIT;
+  }
+
+  // Distance (cm) straight ahead to the nearest wall the drone would hit
+  // at its current altitude, or Infinity if the path is clear. Walls
+  // shorter than the drone are flown over and ignored.
+  _distanceAheadCm() {
+    if (!this._level || !this._level.zones?.length) return Infinity;
+    const dx = Math.cos(this.heading), dy = Math.sin(this.heading);
+    let best = Infinity;
+    for (const z of this._level.zones) {
+      if (z.kind !== 'wall') continue;
+      if ((z.over_height_cm ?? 30) < this.height) continue; // we're above it
+      const hw = (z.w_cm ?? 30) / 2, hh = (z.h_cm ?? 30) / 2;
+      const t = rayBoxDistance(this.x_cm, this.y_cm, dx, dy,
+        (z.x_cm ?? 0) - hw, (z.x_cm ?? 0) + hw, (z.y_cm ?? 0) - hh, (z.y_cm ?? 0) + hh);
+      if (t != null && t < best) best = t;
+    }
+    return best;
+  }
+
+  // Sensor: true when a wall is close in front (front Multi-ranger).
+  wallAhead() {
+    return this._distanceAheadCm() <= WALL_AHEAD_CM + DRONE_RADIUS_CM;
+  }
+
+  // Fly forward, polling `predicate()` each frame, stopping when it
+  // returns true (or on a crash / the safety cap / a mid-flight reset).
+  async forwardUntil(predicate) {
+    if (this._stopped || this._lastError) return;
+    const gen = this._gen;
+    if (!this.flying) {
+      this._fail("can't fly forward — take off first!");
+      return;
+    }
+    this._setStatus('flying forward…', 'flying');
+    this._untilStart = { x: this.x_cm, y: this.y_cm };
+    const dx = Math.cos(this.heading), dy = Math.sin(this.heading);
+    const maxCm = UNTIL_MAX_UNITS * CM_PER_UNIT;
+    const speed = 95; // cm per second
+    this._rotorSpeed = 36;
+    await new Promise((resolve) => {
+      let last = performance.now();
+      const step = (now) => {
+        if (this._gen !== gen || this._stopped || this._lastError) { resolve(); return; }
+        // Stop as soon as the condition is met (checked before advancing).
+        let met = false;
+        try { met = !!predicate(); } catch (_) { met = true; }
+        if (met) { resolve(); return; }
+        if (this.distanceGone() * CM_PER_UNIT >= maxCm) { resolve(); return; }
+        const dt = Math.min(0.05, (now - last) / 1000); last = now;
+        const adv = speed * dt;
+        this.x_cm += dx * adv;
+        this.y_cm += dy * adv;
+        if (this._checkCrash()) { resolve(); return; }
+        if (Math.random() < 0.5) this._trail.push({ x_cm: this.x_cm, y_cm: this.y_cm });
+        if (this._trail.length > 2000) this._trail.shift();
+        requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    });
+    if (this._gen !== gen) return;
     this._rotorSpeed = 20;
   }
 

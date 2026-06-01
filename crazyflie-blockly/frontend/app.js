@@ -25,9 +25,14 @@
     { type: 'land',          label: 'land',       iconKey: 'LAND' },
     // Mid-sequence land — pairs with take_off_loop for the same levels.
     { type: 'land_loop',     label: 'land',       iconKey: 'LAND' },
+    // Reactive flight: keeps going until a condition is met.
+    { type: 'fly_until',     label: 'fly until',  iconKey: 'UNTIL' },
     // Marigold logic tile sits below the dotted divider — it WRAPS other
     // blocks rather than living in the chain like the flight blocks do.
     { type: 'repeat_n',      label: 'repeat',     iconKey: 'REPEAT', hint: '4×', tileClass: 'tile--logic' },
+    // Sage sensor conditions — these PLUG INTO the "fly until" slot.
+    { type: 'wall_ahead',    label: 'wall ahead', iconKey: 'WALLAHEAD', tileClass: 'tile--sensor' },
+    { type: 'gone_units',    label: 'gone',       iconKey: 'GONE', hint: '3×', tileClass: 'tile--sensor' },
   ];
 
   // Same SVG icons as on the blocks (white strokes on the orange tile).
@@ -40,6 +45,9 @@
     TURN_RIGHT: `<svg viewBox="0 0 32 32" class="tile__icon"><g fill="none" stroke="#FFFBEE" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M10 24 A11 11 0 0 1 21 13 L28 13"/><path d="M22 7 L28 13 L22 19"/></g></svg>`,
     REPEAT:     `<svg viewBox="0 0 32 32" class="tile__icon"><g fill="none" stroke="#FFFBEE" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18 A9 9 0 1 0 9 10"/><path d="M4 6 L9 10 L5 15"/></g></svg>`,
     LAND:       `<svg viewBox="0 0 32 32" class="tile__icon"><g fill="none" stroke="#FFFBEE" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4 L16 20"/><path d="M9 14 L16 21 L23 14"/><path d="M5 27 L27 27" stroke-dasharray="2 3"/></g></svg>`,
+    UNTIL:      `<svg viewBox="0 0 32 32" class="tile__icon"><g fill="none" stroke="#FFFBEE" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 16 L19 16"/><path d="M13 10 L19 16 L13 22"/><path d="M25 7 L25 25"/></g></svg>`,
+    WALLAHEAD:  `<svg viewBox="0 0 32 32" class="tile__icon"><g fill="none" stroke="#FFFBEE" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="11" width="20" height="14" rx="1.5"/><path d="M6 18 L26 18 M13 11 L13 18 M19 18 L19 25 M13 25 L13 18"/></g></svg>`,
+    GONE:       `<svg viewBox="0 0 32 32" class="tile__icon"><g fill="none" stroke="#FFFBEE" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 24 L22 24" stroke-dasharray="3 3.5"/><path d="M22 24 L22 8 L29 11 L22 14"/></g></svg>`,
   };
 
   // ----- Blockly workspace (no toolbox — palette lives outside) ----------
@@ -416,7 +424,11 @@
     } finally {
       Blockly.Events.setGroup(false);
     }
-    setLastActive(newBlk);
+    // A condition that plugged into a slot keeps the anchor on its
+    // PARENT statement block, so the next flight block still chains
+    // onto the sequence rather than dangling off the condition.
+    const plugged = newBlk.outputConnection && newBlk.getParent();
+    setLastActive(plugged ? newBlk.getParent() : newBlk);
     refreshCode();
     updateHintVisibility();
     // Open the inline number editor if the inserted block has one,
@@ -430,8 +442,37 @@
   //   - otherwise place it just below the active block (so the kid sees it
   //     appear right where their attention is)
   //   - if there's no active block at all, place at top-left
+  // Find an empty value-input (e.g. a "fly until" condition slot) on a
+  // block, so condition blocks click-to-plug into it.
+  function findEmptyValueInput(block) {
+    if (!block || !block.inputList) return null;
+    for (const input of block.inputList) {
+      const c = input.connection;
+      if (c && (c.type === Blockly.INPUT_VALUE || c.type === 1) && !c.targetBlock()) {
+        return input;
+      }
+    }
+    return null;
+  }
+
   function anchorBlock(newBlk) {
     const anchor = lastActive && lastActive.workspace ? lastActive : null;
+
+    // Condition / value blocks (output, no previous): plug into an open
+    // value input on the active block or its chain (the "fly until" slot).
+    if (newBlk.outputConnection) {
+      let host = anchor;
+      while (host) {
+        const input = findEmptyValueInput(host);
+        if (input) { input.connection.connect(newBlk.outputConnection); return; }
+        host = host.getNextBlock();
+      }
+      // No slot found — drop it near the active block (kid can drag it in).
+      const base = anchor || null;
+      const xy = base ? base.getRelativeToSurfaceXY() : { x: 40, y: 40 };
+      newBlk.moveBy(xy.x + 30, xy.y + 40);
+      return;
+    }
 
     if (!anchor) {
       // Place the first block near the TOP, slightly LEFT of centre.

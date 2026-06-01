@@ -35,6 +35,16 @@
     const body = py.statementToCode(block, 'DO') || (py.INDENT + 'pass\n');
     return `for _ in range(${n}):\n${body}`;
   };
+  // Reactive blocks. fly_until polls a condition while creeping forward.
+  py.forBlock['fly_until'] = (block) => {
+    const cond = py.valueToCode(block, 'COND', py.ORDER_NONE) || 'True';
+    return `drone.forward_until(lambda: ${cond})\n`;
+  };
+  py.forBlock['wall_ahead'] = () => ['drone.wall_ahead()', py.ORDER_FUNCTION_CALL];
+  py.forBlock['gone_units'] = (block) => {
+    const n = block.getFieldValue('UNITS');
+    return [`drone.distance_gone() >= ${n}`, py.ORDER_RELATIONAL];
+  };
 
   // Tell the Python generator to emit a comment header
   py.init = (function (orig) {
@@ -85,6 +95,18 @@
       `}\n` +
       `setRepeatCount(${idLit}, 0);\n`
     );
+  };
+
+  // Reactive blocks (sim). forwardUntil creeps forward, polling the
+  // predicate each frame; the condition blocks read drone sensors.
+  js.forBlock['fly_until'] = (block) => {
+    const cond = js.valueToCode(block, 'COND', js.ORDER_NONE) || 'true';
+    return `await drone.forwardUntil(() => (${cond}));\n`;
+  };
+  js.forBlock['wall_ahead'] = () => ['drone.wallAhead()', js.ORDER_FUNCTION_CALL];
+  js.forBlock['gone_units'] = (block) => {
+    const n = block.getFieldValue('UNITS');
+    return [`drone.distanceGone() >= ${n}`, js.ORDER_RELATIONAL];
   };
 
   // Inject a highlight call before every statement block. The kid sees

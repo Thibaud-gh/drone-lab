@@ -1032,6 +1032,22 @@ body[data-mode="sim"] .sim__chip--battery { display: none; }
   height: 0;
   border-top: 2px dashed rgba(26, 42, 64, 0.4);
 }
+.tile--sensor {
+  --tile-bg:    #7FA877; /* sage — matches the sensor_blocks theme */
+  --tile-edge:  #4F7148;
+}
+/* The first sensor tile gets the dashed divider — these PLUG INTO the
+   "fly until" slot rather than stacking in the chain. */
+.tile--sensor:not(.tile--sensor ~ .tile--sensor) { margin-top: 18px; }
+.tile--sensor:not(.tile--sensor ~ .tile--sensor)::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: -10px;
+  height: 0;
+  border-top: 2px dashed rgba(26, 42, 64, 0.4);
+}
 .tile::before {
   /* the puzzle-piece "tab" on the right, like Blockly's stack hint */
   content: "";
