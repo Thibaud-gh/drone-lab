@@ -180,7 +180,7 @@
       message0: '%1 repeat %2 times',
       args0: [
         { type: 'field_image', src: ICON_REPEAT, width: 22, height: 22, alt: 'repeat' },
-        { type: 'field_number', name: 'TIMES', value: 4, min: 1, max: 10, precision: 1 },
+        { type: 'field_number', name: 'TIMES', value: 3, min: 1, max: 10, precision: 1 },
       ],
       message1: 'do %1',
       args1: [

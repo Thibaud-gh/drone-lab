@@ -263,6 +263,9 @@
       palette: ALL_BLOCKS,
       zones: [],
       win: { type: 'land_anywhere' },
+      // No zones to fit — start the canvas zoomed out enough to see ~8
+      // units of forward distance, so a long flight stays on screen.
+      view_units: 8,
     },
   ];
 })();

@@ -29,7 +29,7 @@
     { type: 'fly_until',     label: 'fly until',  iconKey: 'UNTIL' },
     // Marigold logic tile sits below the dotted divider — it WRAPS other
     // blocks rather than living in the chain like the flight blocks do.
-    { type: 'repeat_n',      label: 'repeat',     iconKey: 'REPEAT', hint: '4×', tileClass: 'tile--logic' },
+    { type: 'repeat_n',      label: 'repeat',     iconKey: 'REPEAT', hint: '3×', tileClass: 'tile--logic' },
     // Sage sensor conditions — these PLUG INTO the "fly until" slot.
     { type: 'wall_ahead',    label: 'wall ahead', iconKey: 'WALLAHEAD', tileClass: 'tile--sensor' },
     { type: 'gone_units',    label: 'gone',       iconKey: 'GONE', hint: '3×', tileClass: 'tile--sensor' },
@@ -201,18 +201,29 @@
     // on the next user-driven SELECTED / BLOCK_DRAG event.
     internalRearrange = true;
     rearrangeTargetBlock = block;
+    // The top block of a stack owns the stack's on-screen position. When a
+    // reorder changes which block is on top (e.g. moving the FIRST block
+    // down, so its old neighbour becomes the new top), the new top keeps
+    // its own lower coordinate and the whole stack visually jumps down a
+    // block. Pin the stack: remember the top-left before, restore it after.
+    const rootBefore = block.getRootBlock();
+    const anchorXY   = rootBefore.getRelativeToSurfaceXY();
     Blockly.Events.setGroup(true);
     try {
       if (dir === 'up') moveBlockUp(block);
       else              moveBlockDown(block);
+      const rootAfter = block.getRootBlock();
+      const cur = rootAfter.getRelativeToSurfaceXY();
+      if (cur.x !== anchorXY.x || cur.y !== anchorXY.y) {
+        rootAfter.moveBy(anchorXY.x - cur.x, anchorXY.y - cur.y);
+      }
     } finally {
       Blockly.Events.setGroup(false);
     }
     refreshCode();
-    updateWorkspaceMobility();   // reorder can shift the bounding box
     setTimeout(() => {
       setLastActive(block);
-      focusFirstNumberField(block);
+      settleViewAndFocus(block);
       requestAnimationFrame(positionToolbar);
     }, 0);
   }
@@ -431,9 +442,11 @@
     setLastActive(plugged ? newBlk.getParent() : newBlk);
     refreshCode();
     updateHintVisibility();
-    // Open the inline number editor if the inserted block has one,
-    // so the kid can type a value right away without a second tap.
-    setTimeout(() => focusFirstNumberField(newBlk), 0);
+    // Settle the view (scroll-lock + scroll a bottom block into view if
+    // the stack overflows) and then open the inline number editor, so the
+    // kid can type a value right away without a second tap — and so no
+    // late scroll dismisses the auto-selected value.
+    setTimeout(() => settleViewAndFocus(newBlk), 0);
   }
 
   // Choose where a freshly-created block goes:
@@ -660,6 +673,14 @@
     const xFrac = (typeof level.home_x_frac === 'number') ? level.home_x_frac : 0.5;
     const hAvailLeft = Math.max(40, cssW * xFrac - margin);
     const hAvailRight = Math.max(40, cssW * (1 - xFrac) - margin);
+    // Zoneless / open levels (the sandbox) can ask for a fixed vertical
+    // view span instead of fitting zones: show `view_units` units of
+    // forward distance from the drone's home up the canvas. 1 unit = 30 cm,
+    // 3.2 px/cm at zoom 1.0.
+    if (typeof level.view_units === 'number') {
+      const spanPx = level.view_units * 30 * 3.2;
+      return Math.max(0.4, Math.min(1.5, vAvail / spanPx));
+    }
     const zoomV = Math.abs(effMinY) > 0
       ? vAvail / (Math.abs(effMinY) * 3.2)
       : 1.5;
@@ -889,15 +910,60 @@
     // fully locked so the kid can't fling her blocks off-screen by
     // accident — by mouse drag OR trackpad swipe. zoom.wheel stays off
     // throughout so a stray pinch never resizes the blocks.
-    workspace.options.moveOptions.drag = overflow;
-    workspace.options.moveOptions.wheel = overflow;
-    workspace.options.zoomOptions.wheel = false;
-    if (workspace.scrollbar) workspace.scrollbar.setContainerVisible(overflow);
-    if (!overflow) {
-      // Keep the stack parked at the top / slightly-left-of-centre.
+    //
+    // Only touch the options + scrollbar on a real fits↔overflow
+    // TRANSITION. This function runs (debounced) on every edit, including
+    // right after a click that just opened the inline number editor; a
+    // redundant setContainerVisible / scroll would dismiss that editor
+    // and lose the auto-selected value. Idempotent = editor survives.
+    if (lastFits !== !overflow) {
+      workspace.options.moveOptions.drag = overflow;
+      workspace.options.moveOptions.wheel = overflow;
+      workspace.options.zoomOptions.wheel = false;
+      if (workspace.scrollbar) workspace.scrollbar.setContainerVisible(overflow);
+      lastFits = !overflow;
+    }
+    // Keep the stack parked at the top / slightly-left-of-centre — but
+    // only scroll when we're not already there, so a no-op scroll(0,0)
+    // doesn't close an open number editor either.
+    if (!overflow && (Math.abs(workspace.scrollX) > 0.5 || Math.abs(workspace.scrollY) > 0.5)) {
       workspace.scroll(0, 0);
     }
-    lastFits = !overflow;
+  }
+  // Run the scroll-lock evaluation NOW rather than on the 60ms debounce,
+  // cancelling any pending one. Used on the insert/move path so the view
+  // is fully settled before we open the number editor (a later scroll
+  // would dismiss it).
+  function flushWorkspaceMobility() {
+    clearTimeout(mobilityTimer);
+    applyWorkspaceMobility();
+  }
+  // When the stack overflows the visible area, scroll just enough that a
+  // freshly-added/moved block sits a little above the bottom edge instead
+  // of below it. Measured in screen pixels (same basis as positionToolbar)
+  // so it's independent of Blockly's metric quirks. No-op when everything
+  // fits (the block is already on-screen).
+  function scrollBlockIntoView(block) {
+    if (!block || !block.workspace) return;
+    const root = block.getSvgRoot?.();
+    if (!root) return;
+    const svgRect   = workspace.getParentSvg().getBoundingClientRect();
+    const blockRect = root.getBoundingClientRect();
+    const margin = 28;  // gap kept below the block so it reads as "just added"
+    const overshootBottom = blockRect.bottom - (svgRect.bottom - margin);
+    if (overshootBottom > 0) {
+      // Move content up: smaller scrollY translates the canvas upward.
+      workspace.scroll(workspace.scrollX, workspace.scrollY - overshootBottom);
+    }
+  }
+  // The ordered tail of every insert/move: settle the view (scroll-lock +
+  // bring the block on-screen) and ONLY THEN open the inline number
+  // editor. Opening it last guarantees no subsequent scroll closes it,
+  // which is what used to swallow the auto-selected value.
+  function settleViewAndFocus(block) {
+    flushWorkspaceMobility();
+    scrollBlockIntoView(block);
+    focusFirstNumberField(block);
   }
 
   workspace.addChangeListener((e) => {
