@@ -31,7 +31,7 @@
     // blocks rather than living in the chain like the flight blocks do.
     { type: 'repeat_n',      label: 'repeat',     iconKey: 'REPEAT', hint: '3×', tileClass: 'tile--logic' },
     // Sage sensor conditions — these PLUG INTO the "fly until" slot.
-    { type: 'wall_ahead',    label: 'wall ahead', iconKey: 'WALLAHEAD', tileClass: 'tile--sensor' },
+    { type: 'wall_ahead',    label: 'wall',       iconKey: 'WALLAHEAD', tileClass: 'tile--sensor' },
     { type: 'gone_units',    label: 'gone',       iconKey: 'GONE', hint: '3×', tileClass: 'tile--sensor' },
   ];
 
@@ -469,7 +469,16 @@
   }
 
   function anchorBlock(newBlk) {
-    const anchor = lastActive && lastActive.workspace ? lastActive : null;
+    let anchor = lastActive && lastActive.workspace ? lastActive : null;
+
+    // If the active block is a condition (a value block plugged into a
+    // slot), treat its containing statement block as the anchor — so
+    // clicking another flight block keeps building the same stack
+    // instead of dangling off the condition.
+    if (anchor && anchor.outputConnection && !newBlk.outputConnection) {
+      const parent = anchor.getParent();
+      if (parent) anchor = parent;
+    }
 
     // Condition / value blocks (output, no previous): plug into an open
     // value input on the active block or its chain (the "fly until" slot).
@@ -1142,9 +1151,23 @@
     const root = block.getSvgRoot?.();
     if (!root) return;
     const clone = root.cloneNode(true);
-    // Strip any nested blocks from the clone — we only want THIS
-    // block's visual on the overlay, not its chain-next or body.
-    clone.querySelectorAll('.blocklyDraggable').forEach(b => b.remove());
+    // Drop sub-blocks that highlight on their own — the next block in the
+    // chain and any statement-body blocks — but KEEP value-input blocks
+    // (e.g. a "fly until" condition), which are part of this block's own
+    // look and never light up separately. Collect their ids from the
+    // live block, then remove the matching nodes in the clone.
+    const dropIds = new Set();
+    const addChain = (b) => { for (let n = b; n; n = n.getNextBlock()) dropIds.add(n.id); };
+    if (block.getNextBlock()) addChain(block.getNextBlock());
+    for (const input of (block.inputList || [])) {
+      if (isStatementInput(input) && input.connection?.targetBlock()) {
+        addChain(input.connection.targetBlock());
+      }
+    }
+    dropIds.forEach((bid) => {
+      const el = clone.querySelector(`[data-id="${CSS.escape(bid)}"]`);
+      if (el) el.remove();
+    });
     // Detach the clone from Blockly's bookkeeping: without this Blockly
     // sees a node with a known `data-id` + `blocklyDraggable` class
     // sitting in the canvas and keeps re-asserting the original

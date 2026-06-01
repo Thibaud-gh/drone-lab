@@ -196,7 +196,7 @@
       // plugged-in condition becomes true. The condition is a separate
       // sage block dropped into the slot (wall_ahead / gone_units).
       type: 'fly_until',
-      message0: '%1 fly forward until %2',
+      message0: '%1 fly until %2',
       args0: [
         { type: 'field_image', src: ICON_UNTIL, width: 22, height: 22, alt: 'fly until' },
         { type: 'input_value', name: 'COND', check: 'Boolean' },
@@ -211,7 +211,7 @@
       // Sensor condition: is there a wall close in front? (front
       // Multi-ranger on the real drone; ray-cast in the sim.)
       type: 'wall_ahead',
-      message0: '%1 wall ahead',
+      message0: '%1 wall',
       args0: [
         { type: 'field_image', src: ICON_WALLAHEAD, width: 22, height: 22, alt: 'wall ahead' },
       ],
@@ -224,7 +224,7 @@
       // units during this "fly forward until". (The loop keeps flying
       // while the travelled distance is still below the threshold.)
       type: 'gone_units',
-      message0: '%1 gone %2 units',
+      message0: '%1 gone %2',
       args0: [
         { type: 'field_image', src: ICON_GONE, width: 22, height: 22, alt: 'gone' },
         { type: 'field_number', name: 'UNITS', value: 3, min: 1, max: 10, precision: 1 },
