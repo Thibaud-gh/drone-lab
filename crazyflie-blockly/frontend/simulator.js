@@ -17,8 +17,8 @@ const CM_PER_UNIT = 30;             // 1 unit (kid-facing) = 30 cm in the world
 const HOME_BOTTOM_INSET = 70;       // px from canvas bottom edge where the drone sits at home
 const ALTITUDE_PX_PER_CM = 52 / 90; // shared between drone-lift and obstacle perspective
 const DRONE_RADIUS_CM = 8;          // for collision — crash when the drone's edge meets the obstacle's edge
-const WALL_AHEAD_CM = 25;           // "wall ahead" trips when a wall is this close in front
-const UNTIL_MAX_UNITS = 12;         // safety cap so "fly until" never runs forever
+const WALL_AHEAD_CM = 15;           // "wall ahead" trips ~half a unit before the wall face
+const UNTIL_MAX_UNITS = 25;         // fly-until fails past this — never fly forever
 
 function pluralUnits(n) {
   return n === 1 ? '1 unit' : `${n} units`;
@@ -276,11 +276,15 @@ class SimDrone {
 
   // Sensor: true when a wall is close in front (front Multi-ranger).
   wallAhead() {
-    return this._distanceAheadCm() <= WALL_AHEAD_CM + DRONE_RADIUS_CM;
+    return this._distanceAheadCm() <= WALL_AHEAD_CM;
   }
 
   // Fly forward, polling `predicate()` each frame, stopping when it
-  // returns true (or on a crash / the safety cap / a mid-flight reset).
+  // returns true. Also bails on a crash, a mid-flight reset, or — if the
+  // condition never trips — a safety cap that fails the flight rather
+  // than flying forever. On a clean stop the drone snaps onto the grid
+  // so "fly until wall" lands tidily (wall at a half-unit → drone on the
+  // whole unit just before it).
   async forwardUntil(predicate) {
     if (this._stopped || this._lastError) return;
     const gen = this._gen;
@@ -291,23 +295,25 @@ class SimDrone {
     this._setStatus('flying forward…', 'flying');
     this._untilStart = { x: this.x_cm, y: this.y_cm };
     const dx = Math.cos(this.heading), dy = Math.sin(this.heading);
-    const maxCm = UNTIL_MAX_UNITS * CM_PER_UNIT;
     const speed = 95; // cm per second
     this._rotorSpeed = 36;
+    let outcome = 'met';
     await new Promise((resolve) => {
       let last = performance.now();
       const step = (now) => {
-        if (this._gen !== gen || this._stopped || this._lastError) { resolve(); return; }
+        if (this._gen !== gen)    { outcome = 'cancel';  resolve(); return; }
+        if (this._stopped)        { outcome = 'stopped'; resolve(); return; }
+        if (this._lastError)      { outcome = 'crash';   resolve(); return; }
         // Stop as soon as the condition is met (checked before advancing).
         let met = false;
         try { met = !!predicate(); } catch (_) { met = true; }
-        if (met) { resolve(); return; }
-        if (this.distanceGone() * CM_PER_UNIT >= maxCm) { resolve(); return; }
+        if (met) { outcome = 'met'; resolve(); return; }
+        if (this.distanceGone() >= UNTIL_MAX_UNITS) { outcome = 'toofar'; resolve(); return; }
         const dt = Math.min(0.05, (now - last) / 1000); last = now;
         const adv = speed * dt;
         this.x_cm += dx * adv;
         this.y_cm += dy * adv;
-        if (this._checkCrash()) { resolve(); return; }
+        if (this._checkCrash()) { outcome = 'crash'; resolve(); return; }
         if (Math.random() < 0.5) this._trail.push({ x_cm: this.x_cm, y_cm: this.y_cm });
         if (this._trail.length > 2000) this._trail.shift();
         requestAnimationFrame(step);
@@ -315,6 +321,22 @@ class SimDrone {
       requestAnimationFrame(step);
     });
     if (this._gen !== gen) return;
+    if (outcome === 'toofar') {
+      this._fail("the drone kept flying and flying — it never found what it was looking for!");
+      return;
+    }
+    if (outcome === 'met') {
+      // Tidy the landing spot onto the grid. If snapping would nudge the
+      // drone into an obstacle, keep the (safe) pre-snap position.
+      const snap = (v) => Math.round(v / CM_PER_UNIT) * CM_PER_UNIT;
+      const ox = this.x_cm, oy = this.y_cm;
+      this.x_cm = snap(ox); this.y_cm = snap(oy);
+      if (this._checkCrash()) {
+        this._lastError = null;
+        this.x_cm = ox; this.y_cm = oy;
+        this._setStatus('flying forward…', 'flying');
+      }
+    }
     this._rotorSpeed = 20;
   }
 

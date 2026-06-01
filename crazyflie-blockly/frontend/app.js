@@ -496,7 +496,9 @@
       const hw = newBlk.getHeightWidth(); // workspace units (unscaled)
       const viewW = (m ? m.viewWidth : 400) / scale;
       const off = workspace.getTopBlocks(false).length * 16; // extra tops cascade
-      const targetX = Math.max(16, viewW / 2 - hw.width / 2 - 28) + off;
+      // Sit it well left of centre — leaves room to the right for the
+      // floating ↑ ↓ ✕ toolbar and for blocks/conditions that grow wider.
+      const targetX = Math.max(16, viewW / 2 - hw.width / 2 - 70) + off;
       const targetY = 22 + off;
       const cur = newBlk.getRelativeToSurfaceXY();
       newBlk.moveBy(targetX - cur.x, targetY - cur.y);
