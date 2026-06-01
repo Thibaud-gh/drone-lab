@@ -8,10 +8,7 @@ Kids snap together friendly picture-blocks; the app turns them into real Python 
 
 No install, no sign-up, nothing to download. It runs entirely in your browser.
 
-<!-- Drop a short screen-recording here once you have one:
-     a flight with the blocks lighting up + the win sparkle.
-     Save it as docs/preview.gif (or .mp4). -->
-![Drone Lab in action](docs/preview.gif)
+[![Drone Lab — snap blocks together and watch the drone fly](docs/preview.gif)](https://thibaud-gh.github.io/drone-lab/)
 
 ---
 

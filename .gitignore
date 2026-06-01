@@ -15,3 +15,7 @@ venv/
 
 # Claude Code — keep launch.json, ignore machine-local permission grants
 .claude/settings.local.json
+
+# Local screen recordings (source for docs/preview.gif)
+preview.mov
+*.mov
