@@ -249,6 +249,7 @@
       id: 9,
       caption: "Fly until you reach the wall, then land!",
       palette: ['take_off', 'fly_forward', 'fly_until', 'wall_ahead', 'land'],
+      home_x_frac: 0.2,   // start bottom-left — long climb ahead
       zones: [
         { kind: 'wall',   x_cm: 0, y_cm: -255, w_cm: 90, h_cm: 12, over_height_cm: 60 },
         { kind: 'target', x_cm: 0, y_cm: -240, w_cm: 60, h_cm: 30, color: 'green' },
@@ -264,6 +265,7 @@
       caption: "Reach the wall, then turn and travel to land beside it!",
       palette: ['take_off', 'fly_forward', 'fly_until', 'wall_ahead', 'gone_units',
                 'turn_left', 'turn_right', 'land'],
+      home_x_frac: 0.2,   // start bottom-left — climb then head right
       zones: [
         { kind: 'wall',   x_cm:   0, y_cm: -255, w_cm: 90, h_cm: 12, over_height_cm: 60 },
         { kind: 'target', x_cm: 120, y_cm: -240, w_cm: 50, h_cm: 50, color: 'green' },
