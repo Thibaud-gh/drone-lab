@@ -242,11 +242,62 @@
       win: { type: 'land_in_zone', zone: 18 },
     },
     {
+      // ───────────── L9 — THE CAPSTONE: three lanes, three loops ─────────────
+      // Drone starts bottom-left and serpentines: UP lane A, DOWN lane B,
+      // UP lane C. Tall brick dividers (you can't climb over them) force
+      // the path; each gap is at the end where you switch lanes.
+      //
+      //   Lane A (x=0)  — over a wall, under a beam, repeating:
+      //       repeat 3 × (fly up 1, forward 1, fly down 1, forward 1)
+      //   Lane B (x=90) — weave around the centre walls, repeating:
+      //       repeat 3 × (forward 1, turn left, forward 1, turn right,
+      //                   forward 1, turn right, forward 1, turn left)
+      //   Lane C (x=180) — collect every package, repeating:
+      //       repeat 3 × (forward 1, land, take off)  then forward 1, land
+      //
+      //   Full solve:
+      //     take off
+      //     repeat 3 × (up 1, fwd 1, down 1, fwd 1)        // lane A
+      //     turn right, fwd 3, turn right                   // A → B (top gap)
+      //     repeat 3 × (fwd 1, turnL, fwd 1, turnR, fwd 1, turnR, fwd 1, turnL)  // lane B
+      //     turn left, fwd 3, turn left                     // B → C (bottom gap)
+      //     repeat 3 × (fwd 1, land, take off), fwd 1, land // lane C
+      id: 9,
+      caption: "The big one — three lanes, three loops! Up, weave down, then collect it all.",
+      // Multiple landings (packages) → *_loop flight variants.
+      palette: ['take_off_loop', 'fly_forward', 'fly_up', 'fly_down',
+                'turn_left', 'turn_right', 'repeat_n', 'land_loop'],
+      home_x_frac: 0.12,   // bottom-left; the maze sprawls up and to the right
+      zones: [
+        // ── Lane A (x=0): alternating wall (fly OVER) / beam (fly UNDER) ──
+        { kind: 'wall', x_cm: 0, y_cm:  -15, w_cm: 60, h_cm: 12, over_height_cm: 30 },
+        { kind: 'beam', x_cm: 0, y_cm:  -45, w_cm: 60, h_cm: 12, under_height_cm: 60 },
+        { kind: 'wall', x_cm: 0, y_cm:  -75, w_cm: 60, h_cm: 12, over_height_cm: 30 },
+        { kind: 'beam', x_cm: 0, y_cm: -105, w_cm: 60, h_cm: 12, under_height_cm: 60 },
+        { kind: 'wall', x_cm: 0, y_cm: -135, w_cm: 60, h_cm: 12, over_height_cm: 30 },
+        { kind: 'beam', x_cm: 0, y_cm: -165, w_cm: 60, h_cm: 12, under_height_cm: 60 },
+        // ── Divider A|B (x=45): tall, gap at the TOP (y -150..-180) ──
+        { kind: 'wall', x_cm: 45, y_cm: -75, w_cm: 12, h_cm: 150, over_height_cm: 90 },
+        // ── Lane B (x=90): centre walls force a weave to the side ──
+        { kind: 'wall', x_cm: 90, y_cm: -135, w_cm: 30, h_cm: 12, over_height_cm: 90 },
+        { kind: 'wall', x_cm: 90, y_cm:  -75, w_cm: 30, h_cm: 12, over_height_cm: 90 },
+        { kind: 'wall', x_cm: 90, y_cm:  -15, w_cm: 30, h_cm: 12, over_height_cm: 90 },
+        // ── Divider B|C (x=150): tall, gap at the BOTTOM (y -30..0) ──
+        { kind: 'wall', x_cm: 150, y_cm: -105, w_cm: 12, h_cm: 150, over_height_cm: 90 },
+        // ── Lane C (x=180): three packages, then the landing pad ──
+        { kind: 'pickup', x_cm: 180, y_cm:  -30, w_cm: 25, h_cm: 25 },
+        { kind: 'pickup', x_cm: 180, y_cm:  -60, w_cm: 25, h_cm: 25 },
+        { kind: 'pickup', x_cm: 180, y_cm:  -90, w_cm: 25, h_cm: 25 },
+        { kind: 'target', x_cm: 180, y_cm: -120, w_cm: 28, h_cm: 28, color: 'green' },
+      ],
+      win: { type: 'pickup_then_land', pickup: [11, 12, 13], zone: 14 },
+    },
+    {
       // First "fly until" level: a wall straight ahead (8.5 units out)
       // with the landing area on the grid line just before it (8 units).
       // "fly until wall ahead" creeps up and stops half a unit short —
       // right on the green. Only the wall_ahead condition here.
-      id: 9,
+      id: 10,
       caption: "Fly until you reach the wall, then land!",
       palette: ['take_off', 'fly_until', 'wall_ahead', 'land'],
       zones: [
@@ -260,7 +311,7 @@
       // a set distance to the landing area sitting 4 units to the RIGHT
       // of the wall. Solution: take off → fly until wall ahead →
       // turn right → fly until gone 4 units → land.
-      id: 10,
+      id: 11,
       caption: "Reach the wall, then turn and travel to land beside it!",
       palette: ['take_off', 'fly_until', 'wall_ahead', 'gone_units',
                 'turn_left', 'turn_right', 'land'],
