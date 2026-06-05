@@ -19,6 +19,7 @@ const ALTITUDE_PX_PER_CM = 52 / 90; // shared between drone-lift and obstacle pe
 const DRONE_RADIUS_CM = 8;          // for collision — crash when the drone's edge meets the obstacle's edge
 const WALL_AHEAD_CM = 15;           // "wall ahead" trips ~half a unit before the wall face
 const UNTIL_MAX_UNITS = 25;         // fly-until fails past this — never fly forever
+const BARRIER_LIFT_CM = 24;         // fixed slab lift for solid "can't fly over" barriers
 
 function pluralUnits(n) {
   return n === 1 ? '1 unit' : `${n} units`;
@@ -147,6 +148,12 @@ class SimDrone {
       const inX = Math.abs(this.x_cm - (z.x_cm ?? 0)) <= hw;
       const inY = Math.abs(this.y_cm - (z.y_cm ?? 0)) <= hh;
       if (!inX || !inY) continue;
+      // Barrier: a solid, full-height wall you cannot fly over at ANY
+      // altitude — touching its footprint is always a crash.
+      if (z.kind === 'barrier') {
+        this._fail("ouch — that wall is too tall to fly over!");
+        return true;
+      }
       // Strict: at the wall's height (or below) → touches its top; at the
       // beam's height (or above) → touches its underside. Either is a crash.
       if (z.kind === 'wall' && this.height <= (z.over_height_cm ?? 30)) {
@@ -264,8 +271,10 @@ class SimDrone {
     const dx = Math.cos(this.heading), dy = Math.sin(this.heading);
     let best = Infinity;
     for (const z of this._level.zones) {
-      if (z.kind !== 'wall') continue;
-      if ((z.over_height_cm ?? 30) < this.height) continue; // we're above it
+      if (z.kind !== 'wall' && z.kind !== 'barrier') continue;
+      // Barriers block at any altitude; plain walls only while we're at
+      // or below their top.
+      if (z.kind === 'wall' && (z.over_height_cm ?? 30) < this.height) continue;
       const hw = (z.w_cm ?? 30) / 2, hh = (z.h_cm ?? 30) / 2;
       const t = rayBoxDistance(this.x_cm, this.y_cm, dx, dy,
         (z.x_cm ?? 0) - hw, (z.x_cm ?? 0) + hw, (z.y_cm ?? 0) - hh, (z.y_cm ?? 0) + hh);
@@ -585,15 +594,17 @@ class SimDrone {
   // existing per-wall renderer.
   _drawWalls(ctx) {
     if (!this._level || !this._level.zones?.length) return;
-    const groups = new Map();
+    // Flyable walls (kind 'wall'): solo → labelled cabinet wall, grouped
+    // → merged shape, lifted by their own over_height.
+    const wallGroups = new Map();
     let soloIdx = 0;
     for (const z of this._level.zones) {
       if (z.kind !== 'wall') continue;
       const gid = z.group ?? `__solo_${soloIdx++}`;
-      if (!groups.has(gid)) groups.set(gid, []);
-      groups.get(gid).push(z);
+      if (!wallGroups.has(gid)) wallGroups.set(gid, []);
+      wallGroups.get(gid).push(z);
     }
-    for (const walls of groups.values()) {
+    for (const walls of wallGroups.values()) {
       if (walls.length === 1) {
         const z = walls[0];
         const cx = this._pxX(z.x_cm ?? 0);
@@ -602,8 +613,22 @@ class SimDrone {
         const h  = (z.h_cm ?? 30) * PX_PER_CM * this._zoom;
         this._drawWall(ctx, cx, cy, w, h, z);
       } else {
-        this._drawWallGroup(ctx, walls);
+        this._drawWallGroup(ctx, walls, walls[0].over_height_cm ?? 30);
       }
+    }
+    // Barriers (kind 'barrier'): solid, unflyable, no number. Always go
+    // through the merged renderer (no label) at a small fixed lift, so
+    // they read as solid brick walls regardless of being solo or grouped.
+    const barrierGroups = new Map();
+    let bSolo = 0;
+    for (const z of this._level.zones) {
+      if (z.kind !== 'barrier') continue;
+      const gid = z.group ?? `__bsolo_${bSolo++}`;
+      if (!barrierGroups.has(gid)) barrierGroups.set(gid, []);
+      barrierGroups.get(gid).push(z);
+    }
+    for (const bs of barrierGroups.values()) {
+      this._drawWallGroup(ctx, bs, BARRIER_LIFT_CM);
     }
   }
 
@@ -621,8 +646,8 @@ class SimDrone {
   //      whole shape uniformly.
   // No individual posts / footprint / labels per member rect — the
   // shape speaks for itself.
-  _drawWallGroup(ctx, walls) {
-    const heightCm = walls[0].over_height_cm ?? 30;
+  _drawWallGroup(ctx, walls, liftCm) {
+    const heightCm = liftCm ?? (walls[0].over_height_cm ?? 30);
     const liftPx   = heightCm * ALTITUDE_PX_PER_CM * this._zoom;
     const rects = walls.map(z => {
       const cx = this._pxX(z.x_cm ?? 0);
