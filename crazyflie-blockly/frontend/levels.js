@@ -243,62 +243,70 @@
     },
     {
       // ───────────── L9 — THE CAPSTONE: three lanes, three loops ─────────────
-      // Drone starts bottom-left and serpentines through a walled maze:
-      // UP lane A, DOWN lane B, UP lane C to the landing. The maze
-      // (lanes B+C + landing) is sealed by solid BARRIERS — brick walls
-      // with no number that you can't fly over at any height. The only
-      // way in is the entrance at the TOP of lane A.
+      // Drone serpentines through a sealed brick maze: UP lane A, DOWN
+      // lane B, UP lane C to the landing. Everything is on the 1-block
+      // (30 cm) grid; lanes are 4 blocks wide. Solid BARRIERS (no number,
+      // can't fly over at any height) wall every lane in, so you can't
+      // skip the obstacles. The only opening is the gap at the TOP of
+      // lane A; the B→C crossing is the gap at the BOTTOM.
       //
-      //   Lane A (x=0)   — over a wall, under a beam, repeating. Obstacles
-      //                    are spaced 2 blocks apart so there's room to
-      //                    climb/drop between them:
-      //       repeat 2 × (fly up 1, forward 2, fly down 1, forward 2)
-      //   Lane B (x=90)  — weave: short left-side barriers jut into the
-      //                    lane, so you dodge to the right around each:
-      //       repeat 4 × (forward 1, turn left, forward 1, turn right,
-      //                   forward 1, turn right, forward 1, turn left)
-      //   Lane C (x=180) — collect every package, repeating:
-      //       repeat 3 × (forward 1, land, take off)  then forward 1, land
+      //   Lane A (x=0)   — full-width wall (fly OVER) / beam (fly UNDER),
+      //                    2 blocks apart, three times:
+      //       repeat 3 × (up 1, forward 2, down 1, forward 2)
+      //   Lane B         — 4 wide; 2-block juts alternate from left and
+      //                    right, so you weave around them:
+      //       repeat 3 × (fwd 2, turnL, fwd 2, turnR, fwd 2, turnR, fwd 2, turnL)
+      //   Lane C (x=240) — five packages a block apart, then land:
+      //       repeat 5 × (forward 2, land, take off)  then forward 2, land
       //
       //   Full solve:
       //     take off
-      //     repeat 2 × (up 1, fwd 2, down 1, fwd 2)         // lane A
-      //     turn right, fwd 3, turn right                    // A → B (top entrance)
-      //     repeat 4 × (fwd 1, turnL, fwd 1, turnR, fwd 1, turnR, fwd 1, turnL)  // lane B weave
-      //     turn left, fwd 3, turn left                      // B → C (bottom gap)
-      //     repeat 3 × (fwd 1, land, take off), fwd 1, land  // lane C
+      //     repeat 3 × (up 1, fwd 2, down 1, fwd 2)          // lane A
+      //     turn right, fwd 3, turn right                     // A → B (top entrance)
+      //     repeat 3 × (fwd 2, turnL, fwd 2, turnR, fwd 2, turnR, fwd 2, turnL)  // lane B
+      //     turn left, fwd 5, turn left                       // B → C (bottom gap)
+      //     repeat 5 × (fwd 2, land, take off), fwd 2, land   // lane C
       id: 9,
       caption: "The big one — three lanes, three loops! Climb, weave down, then collect it all.",
-      // Multiple landings (packages) → *_loop flight variants.
       palette: ['take_off_loop', 'fly_forward', 'fly_up', 'fly_down',
                 'turn_left', 'turn_right', 'repeat_n', 'land_loop'],
-      home_x_frac: 0.1,   // bottom-left; the maze sprawls up and to the right
+      home_x_frac: 0.18,   // bottom-left; the maze sprawls up and to the right
+      zoom_multiplier: 1.0, // it's big — fit it, don't zoom in
+      min_zoom: 0.28,       // allow the whole tall maze to shrink onto the canvas
       zones: [
-        // ── Lane A (x=0): wall (fly OVER) / beam (fly UNDER), 2 blocks apart ──
-        { kind: 'wall', x_cm: 0, y_cm:  -30, w_cm: 60, h_cm: 12, over_height_cm: 30 },
-        { kind: 'beam', x_cm: 0, y_cm:  -90, w_cm: 60, h_cm: 12, under_height_cm: 60 },
-        { kind: 'wall', x_cm: 0, y_cm: -150, w_cm: 60, h_cm: 12, over_height_cm: 30 },
-        { kind: 'beam', x_cm: 0, y_cm: -210, w_cm: 60, h_cm: 12, under_height_cm: 60 },
+        // ── Lane A (x=0): full-width wall / beam, 2 blocks apart, ×3 ──
+        { kind: 'wall', x_cm: 0, y_cm:  -30, w_cm: 120, h_cm: 12, over_height_cm: 30 },
+        { kind: 'beam', x_cm: 0, y_cm:  -90, w_cm: 120, h_cm: 12, under_height_cm: 60 },
+        { kind: 'wall', x_cm: 0, y_cm: -150, w_cm: 120, h_cm: 12, over_height_cm: 30 },
+        { kind: 'beam', x_cm: 0, y_cm: -210, w_cm: 120, h_cm: 12, under_height_cm: 60 },
+        { kind: 'wall', x_cm: 0, y_cm: -270, w_cm: 120, h_cm: 12, over_height_cm: 30 },
+        { kind: 'beam', x_cm: 0, y_cm: -330, w_cm: 120, h_cm: 12, under_height_cm: 60 },
         // ── Maze barriers (group 'maze'): solid, unflyable, no number ──
-        //   Divider A|B — gap at the TOP (y -210..) is the only entrance.
-        { kind: 'barrier', group: 'maze', x_cm:  45, y_cm: -105,   w_cm: 12, h_cm: 210 }, // 0..-210
-        //   Divider B|C — gap at the BOTTOM (y -30..0) crosses into lane C.
-        { kind: 'barrier', group: 'maze', x_cm: 150, y_cm: -142.5, w_cm: 12, h_cm: 225 }, // -30..-255
+        //   Left wall of lane A + divider A|B (gap at TOP = entrance).
+        { kind: 'barrier', group: 'maze', x_cm: -60, y_cm: -180, w_cm: 12, h_cm: 360 }, //  0..-360
+        { kind: 'barrier', group: 'maze', x_cm:  60, y_cm: -165, w_cm: 12, h_cm: 330 }, //  0..-330 (gap -330..-360)
+        //   Divider B|C (gap at BOTTOM = crossing into lane C).
+        { kind: 'barrier', group: 'maze', x_cm: 180, y_cm: -210, w_cm: 12, h_cm: 360 }, // -30..-390
         //   Top cap + right wall seal the maze.
-        { kind: 'barrier', group: 'maze', x_cm: 127, y_cm: -255,   w_cm: 168, h_cm: 12 }, // x 43..211
-        { kind: 'barrier', group: 'maze', x_cm: 210, y_cm: -127.5, w_cm: 12, h_cm: 255 }, // 0..-255
-        //   Lane B weave juts — jut from the left, dodge right around each.
-        { kind: 'barrier', group: 'maze', x_cm: 67.5, y_cm: -195, w_cm: 45, h_cm: 12 },
-        { kind: 'barrier', group: 'maze', x_cm: 67.5, y_cm: -135, w_cm: 45, h_cm: 12 },
-        { kind: 'barrier', group: 'maze', x_cm: 67.5, y_cm:  -75, w_cm: 45, h_cm: 12 },
-        { kind: 'barrier', group: 'maze', x_cm: 67.5, y_cm:  -15, w_cm: 45, h_cm: 12 },
-        // ── Lane C (x=180): three packages, then the landing pad ──
-        { kind: 'pickup', x_cm: 180, y_cm:  -30, w_cm: 25, h_cm: 25 },
-        { kind: 'pickup', x_cm: 180, y_cm:  -60, w_cm: 25, h_cm: 25 },
-        { kind: 'pickup', x_cm: 180, y_cm:  -90, w_cm: 25, h_cm: 25 },
-        { kind: 'target', x_cm: 180, y_cm: -120, w_cm: 28, h_cm: 28, color: 'green' },
+        { kind: 'barrier', group: 'maze', x_cm: 180, y_cm: -390, w_cm: 252, h_cm: 12 }, // x 54..306
+        { kind: 'barrier', group: 'maze', x_cm: 300, y_cm: -195, w_cm: 12, h_cm: 390 }, //  0..-390
+        //   Lane B weave juts — alternate LEFT (open right) and RIGHT
+        //   (open left), 2 blocks wide, forcing the slalom.
+        { kind: 'barrier', group: 'maze', x_cm: 150, y_cm: -330, w_cm: 60, h_cm: 12 }, // right-jut
+        { kind: 'barrier', group: 'maze', x_cm:  90, y_cm: -270, w_cm: 60, h_cm: 12 }, // left-jut
+        { kind: 'barrier', group: 'maze', x_cm: 150, y_cm: -210, w_cm: 60, h_cm: 12 },
+        { kind: 'barrier', group: 'maze', x_cm:  90, y_cm: -150, w_cm: 60, h_cm: 12 },
+        { kind: 'barrier', group: 'maze', x_cm: 150, y_cm:  -90, w_cm: 60, h_cm: 12 },
+        { kind: 'barrier', group: 'maze', x_cm:  90, y_cm:  -30, w_cm: 60, h_cm: 12 },
+        // ── Lane C (x=240): five packages a block apart, then the pad ──
+        { kind: 'pickup', x_cm: 240, y_cm:  -60, w_cm: 25, h_cm: 25 },
+        { kind: 'pickup', x_cm: 240, y_cm: -120, w_cm: 25, h_cm: 25 },
+        { kind: 'pickup', x_cm: 240, y_cm: -180, w_cm: 25, h_cm: 25 },
+        { kind: 'pickup', x_cm: 240, y_cm: -240, w_cm: 25, h_cm: 25 },
+        { kind: 'pickup', x_cm: 240, y_cm: -300, w_cm: 25, h_cm: 25 },
+        { kind: 'target', x_cm: 240, y_cm: -360, w_cm: 28, h_cm: 28, color: 'green' },
       ],
-      win: { type: 'pickup_then_land', pickup: [12, 13, 14], zone: 15 },
+      win: { type: 'pickup_then_land', pickup: [17, 18, 19, 20, 21], zone: 22 },
     },
     {
       // First "fly until" level: a wall straight ahead (8.5 units out)

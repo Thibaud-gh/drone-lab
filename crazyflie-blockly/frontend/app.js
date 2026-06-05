@@ -704,7 +704,10 @@
     // multiplier to start more zoomed in.
     const mult = (typeof level.zoom_multiplier === 'number') ? level.zoom_multiplier : 1.25;
     const fit = Math.min(zoomV, zoomH) * mult;
-    return Math.max(0.4, Math.min(1.5, fit));
+    // Big levels (e.g. the L9 maze) can lower the floor so the whole
+    // thing fits on the canvas instead of overflowing.
+    const minZoom = (typeof level.min_zoom === 'number') ? level.min_zoom : 0.4;
+    return Math.max(minZoom, Math.min(1.5, fit));
   }
 
   // ===== Per-level workspace persistence ========================
