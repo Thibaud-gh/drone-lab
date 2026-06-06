@@ -373,22 +373,25 @@
       //   inward for two more laps before the centre pad:
       //     N 6 → E 6 → S 6 → W 4 → N 4 → E 2 → (final) S 2 to the pad.
       //   Six packages on the way in, pad in the middle. Walls are solid
-      //   BARRIERS (no number) placed a half-unit past each stop so the drone
-      //   snaps tidily onto the whole-unit grid in front of them. Geometry
-      //   verified end-to-end: each leg's forward ray hits only its own wall,
-      //   no crashes, all six collected, lands dead-centre on the pad.
+      //   BARRIERS (no number), each centred on the grid line one cell past
+      //   its stop, so they sit squarely on the grid; the drone stops on the
+      //   package's whole-unit line just in front. The CENTRE PAD has no wall
+      //   beyond it, so the last stop can't be "fly until wall" — the kid has
+      //   to count it out with "fly until gone 2". Geometry verified end-to-
+      //   end: each leg stops on its grid line, no crashes, all six collected,
+      //   lands dead-centre on the pad.
       //
       //   Full solve:
       //     take off
       //     repeat 6 × (fly until wall, land, take off, turn right)
-      //     fly until wall
+      //     fly until gone 2          // no wall past the pad — count instead
       //     land
       id: 11,
-      caption: "Spiral inward — grab all six packages, then land in the middle!",
-      palette: ['take_off_loop', 'fly_until', 'wall_ahead',
+      caption: "Wind inward for all six! Fly until the wall, grab, then turn — the same steps each lap, so let repeat do the work.",
+      palette: ['take_off_loop', 'fly_until', 'wall_ahead', 'gone_units',
                 'turn_right', 'repeat_n', 'land_loop'],
       home_x_frac: 0.2,    // start bottom-left; the spiral winds up and right
-      home_y_inset_px: 95, // lift home a touch — leg-3's wall sits just below the start row
+      home_y_inset_px: 115, // lift home — leg 3 & 4 walls sit a cell below the start row
       zones: [
         // Six packages at the stops, collected on the way in…
         { kind: 'pickup', x_cm:   0, y_cm: -180, w_cm: 25, h_cm: 25 }, // 0  end of leg 1 (N, up the left)
@@ -399,14 +402,15 @@
         { kind: 'pickup', x_cm: 120, y_cm: -120, w_cm: 25, h_cm: 25 }, // 5  end of leg 6 (E, inner lap)
         // …and the landing pad in the middle.
         { kind: 'target', x_cm: 120, y_cm:  -60, w_cm: 40, h_cm: 40, color: 'green' }, // 6  end of leg 7 (S)
-        // One solid wall just past each stop, perpendicular to that leg.
-        { kind: 'barrier', x_cm:   0, y_cm: -201, w_cm: 60, h_cm: 12 }, // stops leg 1 (flying N)
-        { kind: 'barrier', x_cm: 201, y_cm: -180, w_cm: 12, h_cm: 60 }, // stops leg 2 (flying E)
-        { kind: 'barrier', x_cm: 180, y_cm:   21, w_cm: 60, h_cm: 12 }, // stops leg 3 (flying S, just below the start row)
-        { kind: 'barrier', x_cm:  39, y_cm:    0, w_cm: 12, h_cm: 60 }, // stops leg 4 (flying W)
-        { kind: 'barrier', x_cm:  60, y_cm: -141, w_cm: 60, h_cm: 12 }, // stops leg 5 (flying N)
-        { kind: 'barrier', x_cm: 141, y_cm: -120, w_cm: 12, h_cm: 60 }, // stops leg 6 (flying E)
-        { kind: 'barrier', x_cm: 120, y_cm:  -39, w_cm: 60, h_cm: 12 }, // stops the final leg (flying S)
+        // One solid wall a cell past each stop, centred on the grid line.
+        { kind: 'barrier', x_cm:   0, y_cm: -210, w_cm: 60, h_cm: 12 }, // stops leg 1 (flying N)
+        { kind: 'barrier', x_cm: 210, y_cm: -180, w_cm: 12, h_cm: 60 }, // stops leg 2 (flying E)
+        { kind: 'barrier', x_cm: 180, y_cm:   30, w_cm: 60, h_cm: 12 }, // stops leg 3 (flying S, a cell below the start row)
+        { kind: 'barrier', x_cm:  30, y_cm:    0, w_cm: 12, h_cm: 60 }, // stops leg 4 (flying W)
+        { kind: 'barrier', x_cm:  60, y_cm: -150, w_cm: 60, h_cm: 12 }, // stops leg 5 (flying N)
+        { kind: 'barrier', x_cm: 150, y_cm: -120, w_cm: 12, h_cm: 60 }, // stops leg 6 (flying E)
+        // NB: no wall below the pad — the final leg has nothing to bump into,
+        // so the last stop must be "fly until gone 2" (count the distance).
       ],
       win: { type: 'pickup_then_land', pickup: [0, 1, 2, 3, 4, 5], zone: 6 },
     },
