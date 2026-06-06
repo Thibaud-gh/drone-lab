@@ -387,7 +387,7 @@
       //     fly until gone 2          // no wall past the pad — count instead
       //     land
       id: 11,
-      caption: "Spiral in for all six — repeat: fly until the wall, grab, turn!",
+      caption: "Spiral in for all six — fly until the wall, grab, turn and repeat!",
       palette: ['take_off_loop', 'fly_until', 'wall_ahead', 'gone_units',
                 'turn_right', 'repeat_n', 'land_loop'],
       home_x_frac: 0.2,    // start bottom-left; the spiral winds up and right
