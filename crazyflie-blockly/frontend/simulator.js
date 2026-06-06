@@ -291,9 +291,15 @@ class SimDrone {
   // Fly forward, polling `predicate()` each frame, stopping when it
   // returns true. Also bails on a crash, a mid-flight reset, or — if the
   // condition never trips — a safety cap that fails the flight rather
-  // than flying forever. On a clean stop the drone snaps onto the grid
-  // so "fly until wall" lands tidily (wall at a half-unit → drone on the
-  // whole unit just before it).
+  // than flying forever.
+  //
+  // When a wall lies straight ahead we don't creep up to ~15 cm and then
+  // snap onto the grid (that made the drone overshoot the grid line and
+  // visibly pop backward). Instead we work out, up front, the grid line in
+  // the last clear cell before the wall and stop the drone *exactly* there
+  // as it flies past it — so "fly until wall" halts cleanly on a whole unit
+  // with no backward jitter. (The leg is a straight axis-aligned line, so
+  // one ray-cast at the start is enough.)
   async forwardUntil(predicate) {
     if (this._stopped || this._lastError) return;
     const gen = this._gen;
@@ -306,6 +312,23 @@ class SimDrone {
     const dx = Math.cos(this.heading), dy = Math.sin(this.heading);
     const speed = 95; // cm per second
     this._rotorSpeed = 36;
+
+    // Grid line to stop on if there's a wall dead ahead.
+    const onX  = Math.abs(dx) >= Math.abs(dy);     // travelling along x?
+    const sign = onX ? Math.sign(dx) : Math.sign(dy);
+    let gridStop = null;                            // world coord on the travel axis
+    const wallDist = this._distanceAheadCm();       // to the wall's near face
+    if (Number.isFinite(wallDist)) {
+      const startCoord = onX ? this.x_cm : this.y_cm;
+      const clearEdge  = startCoord + sign * (wallDist - DRONE_RADIUS_CM);
+      gridStop = (sign > 0)
+        ? Math.floor(clearEdge / CM_PER_UNIT) * CM_PER_UNIT
+        : Math.ceil(clearEdge / CM_PER_UNIT) * CM_PER_UNIT;
+      // Only honour it if it's actually ahead of us (never nudge backward).
+      const ahead = (sign > 0) ? gridStop >= startCoord : gridStop <= startCoord;
+      if (!ahead) gridStop = null;
+    }
+
     let outcome = 'met';
     await new Promise((resolve) => {
       let last = performance.now();
@@ -313,6 +336,14 @@ class SimDrone {
         if (this._gen !== gen)    { outcome = 'cancel';  resolve(); return; }
         if (this._stopped)        { outcome = 'stopped'; resolve(); return; }
         if (this._lastError)      { outcome = 'crash';   resolve(); return; }
+        // Reached the grid line just before a wall? Stop exactly there.
+        if (gridStop !== null) {
+          const coord = onX ? this.x_cm : this.y_cm;
+          if ((sign > 0 && coord >= gridStop) || (sign < 0 && coord <= gridStop)) {
+            if (onX) this.x_cm = gridStop; else this.y_cm = gridStop;
+            outcome = 'met'; resolve(); return;
+          }
+        }
         // Stop as soon as the condition is met (checked before advancing).
         let met = false;
         try { met = !!predicate(); } catch (_) { met = true; }
@@ -335,8 +366,9 @@ class SimDrone {
       return;
     }
     if (outcome === 'met') {
-      // Tidy the landing spot onto the grid. If snapping would nudge the
-      // drone into an obstacle, keep the (safe) pre-snap position.
+      // Tidy onto the grid. With a wall stop the travel axis is already on a
+      // whole unit (so this only cleans up sub-cm drift on the other axis);
+      // for a "gone N units" stop it snaps both. Revert if it would crash.
       const snap = (v) => Math.round(v / CM_PER_UNIT) * CM_PER_UNIT;
       const ox = this.x_cm, oy = this.y_cm;
       this.x_cm = snap(ox); this.y_cm = snap(oy);
