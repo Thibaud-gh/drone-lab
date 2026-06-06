@@ -355,6 +355,54 @@
       win: { type: 'land_in_zone', zone: 1 },
     },
     {
+      // ───────── L11 — THE SPIRAL: "fly until wall" meets the loop ─────────
+      // The same four-block dance, again and again, winds the drone inward:
+      //
+      //     fly until wall   → a wall stops it (and a package is waiting)
+      //     land             → grab the package
+      //     take off
+      //     turn right       → face the next, shorter arm
+      //
+      // Each arm is a little shorter than the last, so the path coils into
+      // the centre, where the landing pad sits. Because every leg ends at a
+      // wall, the *same* loop body works for every arm — the walls decide how
+      // far each "fly until wall" travels, so the kid never types a distance.
+      //
+      //   Legs (the drone starts facing N, turns right each lap):
+      //     N 6u → E 6u → S 4u → W 3u → (final) N 1u to the centre pad.
+      //   Walls are solid BARRIERS (no number) placed a half-unit past each
+      //   stop so the drone snaps tidily onto the whole-unit grid in front of
+      //   them. Geometry verified end-to-end: each leg's forward ray hits
+      //   only its own wall, no crashes, lands dead-centre on the pad.
+      //
+      //   Full solve:
+      //     take off
+      //     repeat 4 × (fly until wall, land, take off, turn right)
+      //     fly until wall
+      //     land
+      id: 11,
+      caption: "Spiral inward — grab a package at every wall, then land in the middle!",
+      palette: ['take_off_loop', 'fly_until', 'wall_ahead',
+                'turn_right', 'repeat_n', 'land_loop'],
+      home_x_frac: 0.22,   // start bottom-left; the spiral winds up and right
+      zones: [
+        // Packages at each outer stop (collected on the way in)…
+        { kind: 'pickup', x_cm:   0, y_cm: -180, w_cm: 25, h_cm: 25 }, // 0  end of leg 1 (N)
+        { kind: 'pickup', x_cm: 180, y_cm: -180, w_cm: 25, h_cm: 25 }, // 1  end of leg 2 (E)
+        { kind: 'pickup', x_cm: 180, y_cm:  -60, w_cm: 25, h_cm: 25 }, // 2  end of leg 3 (S)
+        { kind: 'pickup', x_cm:  90, y_cm:  -60, w_cm: 25, h_cm: 25 }, // 3  end of leg 4 (W)
+        // …and the landing pad in the middle.
+        { kind: 'target', x_cm:  90, y_cm:  -90, w_cm: 40, h_cm: 40, color: 'green' }, // 4
+        // One solid wall just past each stop, perpendicular to that leg.
+        { kind: 'barrier', x_cm:   0, y_cm: -201, w_cm: 60, h_cm: 12 }, // stops leg 1 (flying N)
+        { kind: 'barrier', x_cm: 201, y_cm: -180, w_cm: 12, h_cm: 60 }, // stops leg 2 (flying E)
+        { kind: 'barrier', x_cm: 180, y_cm:  -39, w_cm: 60, h_cm: 12 }, // stops leg 3 (flying S)
+        { kind: 'barrier', x_cm:  69, y_cm:  -60, w_cm: 12, h_cm: 60 }, // stops leg 4 (flying W)
+        { kind: 'barrier', x_cm:  90, y_cm: -111, w_cm: 60, h_cm: 12 }, // stops the final leg (flying N)
+      ],
+      win: { type: 'pickup_then_land', pickup: [0, 1, 2, 3], zone: 4 },
+    },
+    {
       id: 'sandbox',
       caption: "Sandbox — fly anywhere!",
       palette: ALL_BLOCKS,
