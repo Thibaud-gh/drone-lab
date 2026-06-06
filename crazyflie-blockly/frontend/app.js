@@ -636,6 +636,7 @@
   function buildLevelTabs() {
     tabsEl.innerHTML = '';
     LEVELS.forEach((lvl) => {
+      if (lvl.hidden) return;   // built but not yet released (e.g. L9 capstone)
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'level-tab' + (lvl.id === 'sandbox' ? ' level-tab--sandbox' : '');
@@ -1491,7 +1492,7 @@
     if (stored !== null) {
       const asNum = Number(stored);
       const candidate = Number.isFinite(asNum) && String(asNum) === stored ? asNum : stored;
-      if (LEVELS.some(l => l.id === candidate)) initialLevelId = candidate;
+      if (LEVELS.some(l => l.id === candidate && !l.hidden)) initialLevelId = candidate;
     }
   } catch (_) {}
   setLevel(initialLevelId);
