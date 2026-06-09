@@ -18,6 +18,7 @@ const HOME_BOTTOM_INSET = 70;       // px from canvas bottom edge where the dron
 const ALTITUDE_PX_PER_CM = 52 / 90; // shared between drone-lift and obstacle perspective
 const DRONE_RADIUS_CM = 8;          // for collision — crash when the drone's edge meets the obstacle's edge
 const WALL_AHEAD_CM = 15;           // "wall ahead" trips ~half a unit before the wall face
+const SENSE_RANGE_CM = 30;          // the kid-facing sensor "sees" one block ahead
 const UNTIL_MAX_UNITS = 25;         // fly-until fails past this — never fly forever
 const BARRIER_LIFT_CM = 24;         // fixed slab lift for solid "can't fly over" barriers
 
@@ -47,6 +48,18 @@ function rayBoxDistance(ox, oy, dx, dy, minX, maxX, minY, maxY) {
   }
   if (tmax < tmin || tmax < 0) return null;
   return tmin >= 0 ? tmin : 0;
+}
+
+// Turn easing with personality: a tiny wind-up the other way, then the
+// swing, with a small overshoot that settles exactly on the 90°. Heading
+// overshoot is collision-safe (unlike position overshoot, which could
+// clip a wall the kid legitimately stopped next to).
+function turnEase(t) {
+  if (t < 0.2) return -0.07 * Math.sin((t / 0.2) * Math.PI / 2);
+  const s = (t - 0.2) / 0.8;
+  const k = 0.8;
+  const back = 1 + (k + 1) * Math.pow(s - 1, 3) + k * Math.pow(s - 1, 2);
+  return -0.07 + 1.07 * back;
 }
 
 // Drone "home" — bottom-centre of the canvas in pixels. Cached on each
@@ -95,6 +108,31 @@ class SimDrone {
     // Persists across the whole flight; cleared only on reset.
     this._pickedUpZones = new Set();
     this._untilStart = null;   // origin of the current fly-until (for distanceGone)
+    // Face + crash theater. The face normally derives from `flying`
+    // (neutral on the ground, happy in the air) so real-drone mode gets it
+    // for free; events set an override (dizzy / confused / win) that
+    // persists until the next reset. `_crash` holds the timestamp + tilt
+    // direction of a PHYSICAL crash — all the tumble/dust/stars animation
+    // is computed from elapsed time in _draw, never from tweens, so the
+    // _gen cancellation pattern is untouched.
+    this._faceOverride = null;
+    this._crash = null;
+    this._win = null;
+    this._blinkOffset = Math.random() * 4000;
+    // Sensor-beam state: wallAhead() stamps each read so _draw can show
+    // the sense cone exactly while the program is looking (and nothing
+    // else — a "gone N units" leg never reads the sensor, so no beam).
+    this._senseAt = null;
+    this._senseDist = Infinity;
+    this._ping = null;
+    this._dust = null;       // one short ground puff on takeoff / touchdown
+    // Visual lean spring (forward "pitch") — underdamped, integrated in
+    // _loop, applied as a squash in _drawDrone. Target is set by the
+    // forward moves; the release wobble is the overshoot-settle feel.
+    this._leanTarget = 0;
+    this._leanX = 0;
+    this._leanV = 0;
+    window.DroneSound?.stopAll();
     this._setStatus('ready when you are', 'idle');
     this._updateHud();
     this._trail = [];
@@ -127,10 +165,45 @@ class SimDrone {
 
   // Set when a flight rule is broken (e.g. forward without takeoff). Persists
   // through the rest of the program so the kid sees a single clear message
-  // at the end, not the last successful step.
+  // at the end, not the last successful step. Rule errors get a confused
+  // face — the drone didn't hit anything, it just doesn't understand.
   _fail(msg) {
     this._lastError = msg;
+    this._faceOverride = 'confused';
     this._setStatus(msg, 'stopped');
+  }
+
+  // A PHYSICAL crash (wall / beam / barrier / floor) — unlike a rule error
+  // it gets the full slapstick: rotors cut, the drone tips over, falls out
+  // of the sky, dust puffs, dizzy stars. Crashes are funny; rule errors
+  // are just confusing.
+  _crashFail(msg) {
+    if (this._lastError) return;
+    this._fail(msg);
+    this._faceOverride = 'dizzy';
+    this._rotorSpeed = 0;
+    this._crash = {
+      at: performance.now(),
+      dir: Math.random() < 0.5 ? -1 : 1,   // which way it tips
+    };
+    window.DroneSound?.crash();
+  }
+
+  // Sim-only visual: lets app.js light up the face on a win. Not part of
+  // the Drone driver surface — nothing kid-codeable maps to it.
+  setFace(name) {
+    this._faceOverride = name;
+  }
+
+  // Sim-only visual: the on-canvas win celebration — happy hop, one
+  // pirouette, a sparkle burst from the drone, sage ripples rolling out
+  // from the landing spot, and the pad breathing. Fired by app.js right
+  // before the win stamp; time-driven from _draw and cleared by reset(),
+  // same pattern as the crash theater.
+  celebrate() {
+    this._faceOverride = 'win';
+    this._win = { at: performance.now() };
+    window.DroneSound?.win();
   }
 
   // Collision against wall/beam zones, evaluated against the drone's
@@ -151,17 +224,17 @@ class SimDrone {
       // Barrier: a solid, full-height wall you cannot fly over at ANY
       // altitude — touching its footprint is always a crash.
       if (z.kind === 'barrier') {
-        this._fail("ouch — that wall is too tall to fly over!");
+        this._crashFail("ouch — that wall is too tall to fly over!");
         return true;
       }
       // Strict: at the wall's height (or below) → touches its top; at the
       // beam's height (or above) → touches its underside. Either is a crash.
       if (z.kind === 'wall' && this.height <= (z.over_height_cm ?? 30)) {
-        this._fail('ouch — you needed to fly higher over the wall!');
+        this._crashFail('ouch — you needed to fly higher over the wall!');
         return true;
       }
       if (z.kind === 'beam' && this.height >= (z.under_height_cm ?? 60)) {
-        this._fail('ouch — you needed to fly lower under the beam!');
+        this._crashFail('ouch — you needed to fly lower under the beam!');
         return true;
       }
     }
@@ -190,6 +263,7 @@ class SimDrone {
     }
     this.flying = true;
     this._setStatus('taking off', 'flying');
+    this._dustPuff();   // rotor wash kicks up the ground
     await this._tween(this.height, 30, 800, (v) => {
       this.height = v;
       this._checkCrash();
@@ -213,6 +287,7 @@ class SimDrone {
     if (gen !== this._gen) return;
     this.flying = false;
     this._rotorSpeed = 0;
+    this._dustPuff();   // touchdown puff
     // If we landed inside any pickup zone, remember it — pickup-and-deliver
     // levels read this in evaluateWin to confirm the package was collected.
     if (this._level?.zones?.length) {
@@ -242,16 +317,28 @@ class SimDrone {
     const dy_cm = Math.sin(this.heading) * cm;
     const duration = 30 + cm * 28;
     this._rotorSpeed = 36;
+    this._leanTarget = 1;
     await this._tween(0, 1, duration, (t) => {
       if (gen !== this._gen) return;
       this.x_cm = startXcm + dx_cm * t;
       this.y_cm = startYcm + dy_cm * t;
       if (this._checkCrash()) return;
-      if (Math.random() < 0.5) this._trail.push({ x_cm: this.x_cm, y_cm: this.y_cm });
-      if (this._trail.length > 2000) this._trail.shift();
+      this._trailMark();
     });
+    this._leanTarget = 0;
     if (gen !== this._gen) return;
     this._rotorSpeed = 20;
+  }
+
+  // Append the current position to the trail once it has moved ≥2 cm
+  // since the last point — faithful corners (the old random sampling
+  // clipped them) and bounded memory. Height rides along so the draw
+  // pass can fade segments flown up high.
+  _trailMark() {
+    const last = this._trail[this._trail.length - 1];
+    if (last && Math.hypot(this.x_cm - last.x_cm, this.y_cm - last.y_cm) < 2) return;
+    this._trail.push({ x_cm: this.x_cm, y_cm: this.y_cm, h: this.height });
+    if (this._trail.length > 2000) this._trail.shift();
   }
 
   // ---- Reactive flight + sensors -------------------------------------
@@ -284,8 +371,15 @@ class SimDrone {
   }
 
   // Sensor: true when a wall is close in front (front Multi-ranger).
+  // Each read is timestamped so _draw shows the sense beam while the
+  // program is actively looking, and the sound engine blips like a
+  // parking sensor as the wall gets closer.
   wallAhead() {
-    return this._distanceAheadCm() <= WALL_AHEAD_CM;
+    const d = this._distanceAheadCm();
+    this._senseAt = performance.now();
+    this._senseDist = d;
+    window.DroneSound?.sense(d);
+    return d <= WALL_AHEAD_CM;
   }
 
   // Fly forward, polling `predicate()` each frame, stopping when it
@@ -310,7 +404,8 @@ class SimDrone {
     this._setStatus('flying forward…', 'flying');
     this._untilStart = { x: this.x_cm, y: this.y_cm };
     const dx = Math.cos(this.heading), dy = Math.sin(this.heading);
-    const speed = 95; // cm per second
+    const SPEED_MAX = 95;  // cm per second, cruising
+    const SPEED_MIN = 18;  // arrival creep — slow enough to stop gently
     this._rotorSpeed = 36;
 
     // Grid line to stop on if there's a wall dead ahead.
@@ -350,22 +445,39 @@ class SimDrone {
         if (met) { outcome = 'met'; resolve(); return; }
         if (this.distanceGone() >= UNTIL_MAX_UNITS) { outcome = 'toofar'; resolve(); return; }
         const dt = Math.min(0.05, (now - last) / 1000); last = now;
-        const adv = speed * dt;
+        // Brake on approach: when we know where the leg will stop (a wall
+        // ahead → gridStop), ease from cruise down to a gentle creep over
+        // the last two blocks, so arriving reads as braking — not as
+        // slamming into an invisible wall.
+        let v = SPEED_MAX;
+        if (gridStop !== null) {
+          const remaining = Math.abs(gridStop - (onX ? this.x_cm : this.y_cm));
+          v = SPEED_MIN + (SPEED_MAX - SPEED_MIN) * Math.min(1, remaining / 60);
+        }
+        this._leanTarget = v / SPEED_MAX;   // lean eases off as it brakes
+        const adv = v * dt;
         this.x_cm += dx * adv;
         this.y_cm += dy * adv;
         if (this._checkCrash()) { outcome = 'crash'; resolve(); return; }
-        if (Math.random() < 0.5) this._trail.push({ x_cm: this.x_cm, y_cm: this.y_cm });
-        if (this._trail.length > 2000) this._trail.shift();
+        this._trailMark();
         requestAnimationFrame(step);
       };
       requestAnimationFrame(step);
     });
+    this._leanTarget = 0;
     if (this._gen !== gen) return;
     if (outcome === 'toofar') {
       this._fail("the drone kept flying and flying — it never found what it was looking for!");
       return;
     }
     if (outcome === 'met') {
+      // "Found it!" — ring + chirp at the nose, but only when the wall
+      // sensor was actually being read this leg (beam visible). A gone-N
+      // stop ends quietly.
+      if (this._senseAt && performance.now() - this._senseAt < 250) {
+        this._ping = { at: performance.now() };
+        window.DroneSound?.found();
+      }
       // Tidy onto the grid. With a wall stop the travel axis is already on a
       // whole unit (so this only cleans up sub-cm drift on the other axis);
       // for a "gone N units" stop it snaps both. Revert if it would crash.
@@ -419,7 +531,7 @@ class SimDrone {
     });
     if (gen !== this._gen) return;
     if (hitsFloor && !this._lastError) {
-      this._fail('crash! the drone fell to the floor — use land to come down gently!');
+      this._crashFail('crash! the drone fell to the floor — use land to come down gently!');
       return;
     }
     this._rotorSpeed = 20;
@@ -438,7 +550,7 @@ class SimDrone {
     this._rotorSpeed = 28;
     await this._tween(0, 1, 450, (t) => {
       if (gen !== this._gen) return;
-      this.heading = start + (target - start) * t;
+      this.heading = start + (target - start) * turnEase(t);
     });
     if (gen !== this._gen) return;
     this._rotorSpeed = 20;
@@ -457,7 +569,7 @@ class SimDrone {
     this._rotorSpeed = 28;
     await this._tween(0, 1, 450, (t) => {
       if (gen !== this._gen) return;
-      this.heading = start + (target - start) * t;
+      this.heading = start + (target - start) * turnEase(t);
     });
     if (gen !== this._gen) return;
     this._rotorSpeed = 20;
@@ -496,8 +608,19 @@ class SimDrone {
 
   _updateHud() {
     if (!this.hud) return;
-    // height stored in cm; HUD shows units (1 unit = 30 cm)
-    this.hud.height.firstChild.textContent = (this.height / CM_PER_UNIT).toFixed(1);
+    // height stored in cm; HUD shows units (1 unit = 30 cm). Uses the
+    // visual height so the readout falls to 0 with the crash tumble.
+    this.hud.height.firstChild.textContent = (this._visualHeight() / CM_PER_UNIT).toFixed(1);
+  }
+
+  // Draw-only height: after a crash the drone visually falls out of the
+  // sky over ~half a second while the state height stays untouched (the
+  // theater never mutates flight state — reset() just clears _crash).
+  _visualHeight() {
+    if (!this._crash) return this.height;
+    const e = performance.now() - this._crash.at;
+    const fallT = Math.min(1, Math.max(0, (e - 60) / 450));
+    return this.height * (1 - fallT * fallT);
   }
 
   _loop() {
@@ -505,6 +628,12 @@ class SimDrone {
     const dt = (now - this._lastT) / 1000;
     this._lastT = now;
     this._rotorAngle += this._rotorSpeed * dt;
+    // Integrate the lean spring (clamped dt — rAF can gap when the tab is
+    // backgrounded and a huge step would make the spring explode).
+    const sdt = Math.min(dt, 0.05);
+    this._leanV += (60 * (this._leanTarget - this._leanX) - 8 * this._leanV) * sdt;
+    this._leanX += this._leanV * sdt;
+    window.DroneSound?.update(this._rotorSpeed);
     this._updateHud();
     this._draw();
     requestAnimationFrame(() => this._loop());
@@ -516,6 +645,18 @@ class SimDrone {
     const h = this.canvas._cssH || this.canvas.height;
 
     ctx.clearRect(0, 0, w, h);
+
+    // Crash screen-shake — one short decaying jolt of the whole scene the
+    // moment the drone hits something. Deterministic (sin/cos of elapsed),
+    // so no per-frame randomness to clean up.
+    const crashE = this._crash ? performance.now() - this._crash.at : null;
+    const shaking = crashE !== null && crashE < 340;
+    if (shaking) {
+      const mag = 5 * (1 - crashE / 340);
+      ctx.save();
+      ctx.translate(Math.sin(crashE * 0.085) * mag,
+                    Math.cos(crashE * 0.11) * mag * 0.7);
+    }
 
     // grid — every 30cm (same as the scale bar), so it scales with zoom.
     // Anchored to home + current pan so the grid drifts with the canvas
@@ -538,19 +679,33 @@ class SimDrone {
     // 1. Floor: target outlines, wall footprints, beam ground-shadows.
     this._drawZonesFloor(ctx);
 
-    // trail — persists until drone.reset() clears it
+    // trail — persists until drone.reset() clears it. Drawn in runs of
+    // similar altitude: segments flown up high are fainter and thinner,
+    // so an over-the-wall hop stays readable in the trail afterwards.
     if (this._trail.length > 1) {
       ctx.save();
-      ctx.lineWidth = 2.5 * this._zoom;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
-      ctx.strokeStyle = 'rgba(231,111,81,0.55)';
-      ctx.beginPath();
-      ctx.moveTo(this._pxX(this._trail[0].x_cm), this._pxY(this._trail[0].y_cm));
-      for (let i = 1; i < this._trail.length; i++) {
-        ctx.lineTo(this._pxX(this._trail[i].x_cm), this._pxY(this._trail[i].y_cm));
+      const bucketOf = (p) => Math.round((p.h ?? 0) / 15);
+      let i = 0;
+      while (i < this._trail.length - 1) {
+        const bucket = bucketOf(this._trail[i]);
+        let j = i + 1;
+        while (j < this._trail.length && bucketOf(this._trail[j]) === bucket) j++;
+        // 0 at cruise height (1 unit) and below → full trail; fades as the
+        // run was flown higher (full fade by ~2.5 units).
+        const t = Math.min(1, Math.max(0, (bucket * 15 - 30) / 45));
+        ctx.strokeStyle = `rgba(231,111,81,${0.55 - t * 0.3})`;
+        ctx.lineWidth = (2.5 - t * 0.9) * this._zoom;
+        ctx.beginPath();
+        ctx.moveTo(this._pxX(this._trail[i].x_cm), this._pxY(this._trail[i].y_cm));
+        const end = Math.min(j, this._trail.length - 1);
+        for (let k = i + 1; k <= end; k++) {
+          ctx.lineTo(this._pxX(this._trail[k].x_cm), this._pxY(this._trail[k].y_cm));
+        }
+        ctx.stroke();
+        i = j;
       }
-      ctx.stroke();
       ctx.restore();
     }
 
@@ -559,13 +714,33 @@ class SimDrone {
     // This is the perspective cue that says "it's hovering, not driving".
     const px        = this._pxX(this.x_cm);
     const py_ground = this._pxY(this.y_cm);
+    // After a crash the drone visually falls out of the sky (see
+    // _visualHeight — draw-only, state height is untouched).
+    const visH = this._visualHeight();
     // Same altitude-to-px factor obstacles use, so the drone visually
     // clears a wall when its height >= wall.over_height_cm and is below
     // the beam when its height <= beam.under_height_cm.
-    const lift      = this.height * ALTITUDE_PX_PER_CM * this._zoom;
-    const py_drone  = py_ground - lift;
+    const lift      = visH * ALTITUDE_PX_PER_CM * this._zoom;
+    // Win hop — a happy little bounce at the start of the celebration
+    // (draw-only px offset, like the crash fall).
+    const winE = this._win ? performance.now() - this._win.at : null;
+    let hopPx = 0;
+    if (winE !== null && winE < 650) {
+      hopPx = Math.sin(Math.PI * (winE / 650)) * 14 * this._zoom;
+    }
+    // Idle hover-bob — a gentle sinusoid while airborne. Fades in with
+    // height so takeoff/touchdown don't pop, and a crashed drone lies still.
+    let bobPx = 0;
+    if (this.flying && !this._crash) {
+      bobPx = Math.sin(performance.now() * 0.004) * 2.5 * this._zoom *
+              Math.min(1, visH / 20);
+    }
+    const py_drone  = py_ground - lift - hopPx - bobPx;
 
-    this._drawShadow(ctx, px, py_ground);
+    this._drawShadow(ctx, px, py_ground, visH);
+
+    // Ground dust from takeoff / touchdown — floor-level, so before walls.
+    this._drawDust(ctx);
 
     // 2. Walls — solid brick bodies, drawn after the trail but before
     //    the drone, so a drone flying OVER appears in front of them.
@@ -590,14 +765,43 @@ class SimDrone {
     //    beam it hasn't reached.
     this._drawBeams(ctx, false);
 
+    // 3b. Sensor beam — over the walls (the cone visibly touches the slab
+    //     it sees) but under the drone. Drawn only while the program is
+    //     actively reading the wall sensor; also hosts the found-it ping.
+    this._drawSenseBeam(ctx, px, py_drone);
+
     // 4. Drone marker.
-    this._drawDrone(ctx, px, py_drone);
+    this._drawDrone(ctx, px, py_drone, visH);
 
     // 5. Beams the drone is genuinely flying UNDER — drawn after it so
     //    the beam occludes the drone (it's above). See _beamOccludesDrone.
     this._drawBeams(ctx, true);
 
-    if (this.height > 1) this._drawHeightBadge(ctx, px, py_drone);
+    // 6. Crash theater on top of everything: impact dust + dizzy stars.
+    if (crashE !== null) this._drawCrashFX(ctx, crashE, px, py_ground, py_drone);
+
+    // 6b. Win celebration: landing-spot ripples + sparkle burst.
+    if (winE !== null) this._drawWinFX(ctx, winE, px, py_ground, py_drone);
+
+    // 6c. "Found it!" ping — two sage rings expanding from the drone when
+    //     a sensed fly-until leg stops at its wall. Drawn over the drone
+    //     (and starting outside its body) so it actually reads.
+    if (this._ping) {
+      for (const delay of [0, 140]) {
+        const pt = (performance.now() - this._ping.at - delay) / 550;
+        if (pt <= 0 || pt >= 1) continue;
+        ctx.save();
+        ctx.strokeStyle = `rgba(127,168,119,${0.9 * (1 - pt)})`;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(px, py_drone, (20 + pt * 34) * this._zoom, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+
+    if (visH > 1) this._drawHeightBadge(ctx, px, py_drone, visH);
+    if (shaking) ctx.restore();
   }
 
   // 1st pass — things that live on the floor (target outlines + beam
@@ -778,8 +982,14 @@ class SimDrone {
   }
 
   _drawTarget(ctx, cx, cy, w, h /*, z */) {
+    // During a win celebration the pad breathes — the fill swells gently
+    // until the next reset.
+    let alpha = 0.32;
+    if (this._win) {
+      alpha = 0.38 + 0.16 * Math.sin((performance.now() - this._win.at) * 0.005);
+    }
     ctx.save();
-    ctx.fillStyle = 'rgba(127,168,119,0.32)';
+    ctx.fillStyle = `rgba(127,168,119,${alpha})`;
     ctx.strokeStyle = '#5C8657';
     ctx.lineWidth = 2;
     ctx.setLineDash([6, 5]);
@@ -811,12 +1021,17 @@ class SimDrone {
   }
 
   // Beam casts a shadow on the floor at its world position. Drawn in
-  // the floor pass so trail + drone paint over it naturally.
+  // the floor pass so trail + drone paint over it naturally. Soft edge
+  // faked with an inflated fainter pass (no ctx.filter — see _drawShadow).
   _drawBeamShadow(ctx, cx, cy, w, h) {
+    const z = this._zoom;
     ctx.save();
-    ctx.fillStyle = 'rgba(26,42,64,0.22)';
-    ctx.filter = `blur(${3 * this._zoom}px)`;
-    this._roundRect(ctx, cx - w/2 + 2 * this._zoom, cy - h/2 + 1 * this._zoom, w, h, 6);
+    ctx.fillStyle = 'rgba(26,42,64,0.10)';
+    this._roundRect(ctx, cx - w/2 + 2 * z - 3 * z, cy - h/2 + 1 * z - 3 * z,
+                    w + 6 * z, h + 6 * z, 8);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(26,42,64,0.16)';
+    this._roundRect(ctx, cx - w/2 + 2 * z, cy - h/2 + 1 * z, w, h, 6);
     ctx.fill();
     ctx.restore();
   }
@@ -927,29 +1142,37 @@ class SimDrone {
     ctx.restore();
   }
 
-  _drawShadow(ctx, px, py_ground) {
+  _drawShadow(ctx, px, py_ground, visH) {
     // The drone is now visually lifted upward (see _draw), so the shadow
     // stays anchored at the world position. It grows + softens with
     // altitude so the kid sees "higher = bigger, fuzzier shadow".
-    const altRatio = Math.min(1, this.height / 90);
+    // Softness comes from a radial gradient, not ctx.filter blur — the
+    // filter is unsupported on Safari < 18 and costly to run per frame.
+    const altRatio = Math.min(1, (visH ?? this.height) / 90);
     const z = this._zoom;
     const rx = (16 + altRatio * 14) * z;
     const ry = (7  + altRatio * 6)  * z;
+    const alpha = 0.45 - altRatio * 0.22;
+    const solid = Math.max(0.1, 0.6 - altRatio * 0.35);   // higher = fuzzier
     ctx.save();
     ctx.translate(px + 2 * z, py_ground + 1 * z);    // tiny tilt
-    ctx.filter = `blur(${(2 + altRatio * 6) * z}px)`;
-    ctx.fillStyle = `rgba(26,42,64,${0.45 - altRatio * 0.22})`;
+    ctx.scale(1, ry / rx);                           // ellipse via scale
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, rx);
+    g.addColorStop(0, `rgba(26,42,64,${alpha})`);
+    g.addColorStop(solid, `rgba(26,42,64,${alpha * 0.85})`);
+    g.addColorStop(1, 'rgba(26,42,64,0)');
+    ctx.fillStyle = g;
     ctx.beginPath();
-    ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
+    ctx.arc(0, 0, rx, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
   }
 
-  _drawDrone(ctx, px, py) {
+  _drawDrone(ctx, px, py, visH) {
     // The drone scales with the canvas zoom — same convention as everything
     // else on the canvas (grid, trail, zones, shadow). Altitude still gives
     // a small extra bump for perspective.
-    const altRatio = Math.min(1, this.height / 80);
+    const altRatio = Math.min(1, (visH ?? this.height) / 80);
     const scale = (1 + altRatio * 0.18) * this._zoom;
     const r = 16 * scale;
     const arm = 26 * scale;
@@ -958,6 +1181,30 @@ class SimDrone {
     ctx.save();
     ctx.translate(px, py);
     ctx.rotate(this.heading + Math.PI / 2);
+
+    // Crash tumble — tip over with a springy overshoot (ease-out-back),
+    // like a thunk onto one side. Direction was rolled at crash time.
+    if (this._crash) {
+      const t = Math.min(1, (performance.now() - this._crash.at) / 650);
+      const k = 1.7;
+      const back = 1 + (k + 1) * Math.pow(t - 1, 3) + k * Math.pow(t - 1, 2);
+      ctx.rotate(this._crash.dir * 1.85 * back);
+    }
+
+    // Win pirouette — one full spin during the hop. Visual only: it ends
+    // exactly back at 2π, so the heading the kid programmed is untouched.
+    if (this._win) {
+      const t = Math.min(1, (performance.now() - this._win.at) / 700);
+      const eased = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      ctx.rotate(eased * Math.PI * 2);
+    }
+
+    // Forward lean — a slight squash along the travel axis (nose is -y in
+    // this frame, so shrinking y reads as pitching into the motion). The
+    // spring's release wobble gives the overshoot-settle feel at each stop.
+    if (Math.abs(this._leanX) > 0.01) {
+      ctx.scale(1 + 0.05 * this._leanX, 1 - 0.09 * this._leanX);
+    }
 
     ctx.lineCap = 'round';
     ctx.lineWidth = 4 * scale;
@@ -1011,10 +1258,7 @@ class SimDrone {
     ctx.fill();
     ctx.stroke();
 
-    ctx.fillStyle = '#1A2A40';
-    ctx.beginPath();
-    ctx.arc(0, -r * 0.45, r * 0.18, 0, Math.PI * 2);
-    ctx.fill();
+    this._drawFace(ctx, r, scale);
 
     ctx.fillStyle = '#F0A93B';
     ctx.beginPath();
@@ -1030,9 +1274,253 @@ class SimDrone {
     ctx.restore();
   }
 
-  _drawHeightBadge(ctx, px, py) {
+  // The face — two eyes + a mouth on the body, looking toward the nose
+  // (replaces the old single front-dot; the marigold nose triangle still
+  // marks heading). With no override the expression derives from `flying`,
+  // so bridge-driven real-drone state gets a face for free; events set
+  // dizzy / confused / win overrides that persist until the next reset.
+  _drawFace(ctx, r, scale) {
+    const face = this._faceOverride || (this.flying ? 'happy' : 'neutral');
+    const ex = r * 0.34, ey = -r * 0.18, er = r * 0.15;
+    ctx.save();
+    ctx.strokeStyle = '#1A2A40';
+    ctx.fillStyle = '#1A2A40';
+    ctx.lineCap = 'round';
+    ctx.lineWidth = Math.max(1.2, 1.6 * scale);
+
+    if (face === 'dizzy') {
+      // X eyes + a wobbly frown.
+      const s = er * 1.1;
+      for (const sx of [-ex, ex]) {
+        ctx.beginPath();
+        ctx.moveTo(sx - s, ey - s); ctx.lineTo(sx + s, ey + s);
+        ctx.moveTo(sx + s, ey - s); ctx.lineTo(sx - s, ey + s);
+        ctx.stroke();
+      }
+      ctx.beginPath();
+      ctx.arc(0, r * 0.62, r * 0.30, Math.PI * 1.15, Math.PI * 1.85);
+      ctx.stroke();
+    } else if (face === 'win') {
+      // Closed happy eyes (^ ^) + the biggest smile.
+      for (const sx of [-ex, ex]) {
+        ctx.beginPath();
+        ctx.arc(sx, ey + er, er * 1.25, Math.PI * 1.15, Math.PI * 1.85);
+        ctx.stroke();
+      }
+      ctx.beginPath();
+      ctx.arc(0, r * 0.18, r * 0.34, Math.PI * 0.15, Math.PI * 0.85);
+      ctx.stroke();
+    } else if (face === 'confused') {
+      // Uneven eyes + a flat, slightly slanted mouth — "huh?"
+      ctx.beginPath(); ctx.arc(-ex, ey, er, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(ex, ey - er * 0.6, er * 0.7, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(-r * 0.30, r * 0.42); ctx.lineTo(r * 0.30, r * 0.34);
+      ctx.stroke();
+    } else {
+      // neutral / happy — round eyes with a periodic blink. Time-based so
+      // it costs nothing; _blinkOffset desyncs it from the page load.
+      const blink = ((performance.now() + this._blinkOffset) % 4200) < 130;
+      for (const sx of [-ex, ex]) {
+        if (blink) {
+          ctx.beginPath();
+          ctx.moveTo(sx - er, ey); ctx.lineTo(sx + er, ey);
+          ctx.stroke();
+        } else {
+          ctx.beginPath(); ctx.arc(sx, ey, er, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+      ctx.beginPath();
+      if (face === 'happy') ctx.arc(0, r * 0.18, r * 0.32, Math.PI * 0.15, Math.PI * 0.85);
+      else                  ctx.arc(0, r * 0.30, r * 0.22, Math.PI * 0.25, Math.PI * 0.75);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // One short puff of rotor-wash dust at the drone's ground position —
+  // fired on takeoff and on touchdown (the crash has its own, bigger one).
+  _dustPuff() {
+    this._dust = { at: performance.now(), x: this.x_cm, y: this.y_cm };
+  }
+
+  _drawDust(ctx) {
+    if (!this._dust) return;
+    const p = (performance.now() - this._dust.at) / 700;
+    if (p >= 1) return;
     const z = this._zoom;
-    const units = (this.height / CM_PER_UNIT).toFixed(1);
+    const dpx = this._pxX(this._dust.x), dpy = this._pxY(this._dust.y);
+    ctx.save();
+    ctx.fillStyle = `rgba(122,110,90,${0.5 * (1 - p)})`;
+    const puffs = [[-1, -0.2, 0.8], [1, -0.3, 0.7], [-0.6, 0.25, 0.6],
+                   [0.7, 0.2, 0.75], [0, 0.45, 0.5], [0, -0.5, 0.55]];
+    for (const [dx, dy, s] of puffs) {
+      const dist = (8 + p * 22) * z;
+      ctx.beginPath();
+      ctx.arc(dpx + dx * dist, dpy + dy * dist * 0.6, (4 + p * 7) * s * z, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // Crash theater overlays — dust kicked up at the impact point and dizzy
+  // stars orbiting the (now grounded) drone. Pure functions of elapsed
+  // time; reset() clears _crash and they vanish.
+  _drawCrashFX(ctx, e, px, py_ground, py_drone) {
+    const z = this._zoom;
+    // Dust puffs — appear as the drone thumps down, drift out + fade.
+    if (e > 420 && e < 1500) {
+      const p = (e - 420) / 1080;
+      ctx.save();
+      ctx.fillStyle = `rgba(122,110,90,${0.4 * (1 - p)})`;
+      const puffs = [[-1, -0.25, 1], [1, -0.35, 0.8], [-0.55, 0.18, 0.7],
+                     [0.7, 0.22, 0.9], [0, -0.55, 0.6]];
+      for (const [dx, dy, s] of puffs) {
+        const dist = (10 + p * 26) * z;
+        ctx.beginPath();
+        ctx.arc(px + dx * dist, py_ground + dy * dist * 0.6,
+                (4 + p * 9) * s * z, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+    // Dizzy stars — three marigold sparks orbiting over the body, forever
+    // (until reset). The slow ellipse + size wobble reads as circling.
+    if (e > 380) {
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, (e - 380) / 250);
+      ctx.fillStyle = '#E9B44C';
+      ctx.strokeStyle = '#1A2A40';
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 3; i++) {
+        const ang = e * 0.0035 + (i * Math.PI * 2) / 3;
+        const sx = px + Math.cos(ang) * 26 * z;
+        const sy = py_drone - 30 * z + Math.sin(ang) * 9 * z;
+        const sc = (0.8 + 0.25 * Math.sin(ang * 2)) * z;
+        this._drawStar(ctx, sx, sy, 6 * sc);
+      }
+      ctx.restore();
+    }
+  }
+
+  // The wall sensor, made visible — as a short whisker, because the
+  // kid-facing model is "the drone sees one block ahead" (SENSE_RANGE_CM).
+  // A small sage cone scans off the nose while the program is reading the
+  // sensor; when a wall comes inside the block, the cone snaps to the wall
+  // face, brightens, and a bracket marks what it sees. Drawn only while
+  // the last wallAhead() read is fresh (~one polled frame), so it appears
+  // for "fly until wall ahead" and never for "gone N units" — and will
+  // light up for free under a future "if wall ahead" block.
+  _drawSenseBeam(ctx, px, py) {
+    const now = performance.now();
+    if (!this._senseAt || now - this._senseAt > 120) return;
+    const z = this._zoom;
+    const dx = Math.cos(this.heading), dy = Math.sin(this.heading);
+    const hit  = Number.isFinite(this._senseDist) && this._senseDist <= SENSE_RANGE_CM;
+    const seen = Math.min(this._senseDist, SENSE_RANGE_CM);
+    const nose = 20 * z;                               // start past the body
+    const len  = seen * PX_PER_CM * z;
+    const sx = px + dx * nose, sy = py + dy * nose;
+    const ex = px + dx * (nose + len), ey = py + dy * (nose + len);
+    const pxn = -dy, pyn = dx;                         // beam-perpendicular
+    // A wide detection fan (~40° full angle) — reads as "looking", not a
+    // laser pointer. Width grows with reach so the mouth sits at the wall.
+    // (`len` is already in zoomed px, so only the base gets the z factor.)
+    const halfW = 4 * z + len * 0.36;
+
+    ctx.save();
+    // scanning cone, breathing slightly so it reads as "active"; brighter
+    // the moment something is actually in range
+    const pulse = 0.18 + 0.06 * Math.sin(now * 0.012);
+    ctx.fillStyle = `rgba(127,168,119,${hit ? pulse + 0.14 : pulse})`;
+    ctx.beginPath();
+    ctx.moveTo(sx + pxn * 4 * z, sy + pyn * 4 * z);
+    ctx.lineTo(ex + pxn * halfW, ey + pyn * halfW);
+    ctx.lineTo(ex - pxn * halfW, ey - pyn * halfW);
+    ctx.lineTo(sx - pxn * 4 * z, sy - pyn * 4 * z);
+    ctx.closePath();
+    ctx.fill();
+    // dashed centre ray, marching outward
+    ctx.strokeStyle = 'rgba(92,134,87,0.85)';
+    ctx.lineWidth = 1.6 * z;
+    ctx.setLineDash([4 * z, 4 * z]);
+    ctx.lineDashOffset = -((now * 0.02 * z) % (8 * z));
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);
+    ctx.lineTo(ex, ey);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // bracket on the wall face the moment it enters the sensed block
+    if (hit) {
+      ctx.strokeStyle = '#5C8657';
+      ctx.lineWidth = 2.5 * z;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(ex + pxn * (halfW + 3 * z), ey + pyn * (halfW + 3 * z));
+      ctx.lineTo(ex - pxn * (halfW + 3 * z), ey - pyn * (halfW + 3 * z));
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // Win celebration overlays — sage ripples rolling out from the landing
+  // spot and a burst of sparks (the block-category colours) flying out of
+  // the drone. One-shot, time-driven; reset() clears _win.
+  _drawWinFX(ctx, e, px, py_ground, py_drone) {
+    const z = this._zoom;
+    // Ripples — three flattened rings, floor-perspective like the shadow.
+    for (let k = 0; k < 3; k++) {
+      const rt = (e - k * 200) / 850;
+      if (rt <= 0 || rt >= 1) continue;
+      ctx.save();
+      ctx.strokeStyle = `rgba(127,168,119,${0.7 * (1 - rt)})`;
+      ctx.lineWidth = 2.5 * z;
+      ctx.beginPath();
+      ctx.ellipse(px, py_ground, (10 + rt * 46) * z, (10 + rt * 46) * 0.55 * z,
+                  0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+    // Sparkle burst — a ring of sparks racing out from the drone.
+    if (e < 950) {
+      const colors = ['#E9B44C', '#7FA877', '#E76F51', '#C9486A'];
+      const t = e / 950;
+      const fly = 1 - Math.pow(1 - t, 3);
+      ctx.save();
+      ctx.globalAlpha = 1 - t;
+      ctx.strokeStyle = '#1A2A40';
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 12; i++) {
+        const ang = (i * Math.PI * 2) / 12 + 0.4;
+        const dist = (14 + (26 + (i % 3) * 9) * fly) * z;
+        const sx = px + Math.cos(ang) * dist;
+        const sy = py_drone + Math.sin(ang) * dist * 0.85;
+        ctx.fillStyle = colors[i % 4];
+        this._drawStar(ctx, sx, sy, (4 + (i % 3) * 1.6) * z);
+      }
+      ctx.restore();
+    }
+  }
+
+  // 4-point sparkle (same silhouette as the win-stamp sparks in app.js).
+  _drawStar(ctx, x, y, s) {
+    ctx.beginPath();
+    ctx.moveTo(x, y - s);
+    ctx.lineTo(x + s * 0.27, y - s * 0.27);
+    ctx.lineTo(x + s, y);
+    ctx.lineTo(x + s * 0.27, y + s * 0.27);
+    ctx.lineTo(x, y + s);
+    ctx.lineTo(x - s * 0.27, y + s * 0.27);
+    ctx.lineTo(x - s, y);
+    ctx.lineTo(x - s * 0.27, y - s * 0.27);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  _drawHeightBadge(ctx, px, py, visH) {
+    const z = this._zoom;
+    const units = ((visH ?? this.height) / CM_PER_UNIT).toFixed(1);
     const label = `↑ ${units}`;
     ctx.save();
     ctx.font = `500 ${Math.round(12 * z)}px "Lexend", system-ui, sans-serif`;

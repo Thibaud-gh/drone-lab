@@ -169,12 +169,7 @@
         <nav class="level-tabs" id="level-tabs" aria-label="Pick a level"></nav>
 
         <div class="sim">
-          <div class="sim__sky">
-            <svg class="sim__sky-bird" viewBox="0 0 60 30" aria-hidden="true">
-              <path d="M4 18 Q14 6 24 18 Q34 6 44 18" fill="none"
-                    stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-            </svg>
-          </div>
+          <div class="sim__sky"></div>
           <canvas id="sim-canvas" width="640" height="480"></canvas>
 
           <div class="sim__hud">
@@ -186,6 +181,8 @@
               <span class="sim__chip-label">battery</span>
               <span class="sim__chip-value">98<span class="sim__chip-unit">%</span></span>
             </div>
+            <button class="sim__chip sim__chip--sound" id="sound-btn" type="button"
+                    title="sound on / off" aria-label="sound on or off">🔊</button>
           </div>
 
           <div class="sim__status" id="sim-status">
@@ -235,6 +232,7 @@
     <script src="blocks.js"></script>
     <script src="generator.js"></script>
     <script src="levels.js"></script>
+    <script src="sound.js"></script>
     <script src="simulator.js"></script>
     <script src="bridge.js"></script>
     <script src="app.js"></script>

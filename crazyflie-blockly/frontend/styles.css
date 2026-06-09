@@ -796,20 +796,6 @@ body {
     radial-gradient(ellipse 70% 50% at 50% 0%, var(--sky-2) 0%, transparent 60%),
     linear-gradient(180deg, var(--sky-1) 0%, var(--sky-3) 100%);
 }
-.sim__sky-bird {
-  position: absolute;
-  top: 16%;
-  right: 8%;
-  width: 40px;
-  color: var(--ink);
-  opacity: 0.45;
-  animation: drift 12s ease-in-out infinite alternate;
-}
-@keyframes drift {
-  from { transform: translate(0, 0) rotate(-2deg); }
-  to   { transform: translate(-18px, 8px) rotate(3deg); }
-}
-
 #sim-canvas {
   position: absolute;
   inset: 0;
@@ -871,6 +857,21 @@ body {
    Kept in the markup so we can surface a real reading from cflib once the
    bridge streams it. */
 body[data-mode="sim"] .sim__chip--battery { display: none; }
+
+/* sound on/off — a compact chip-shaped button under the height chip */
+.sim__chip--sound {
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  align-self: flex-end;
+  width: 44px;
+  min-width: 0;
+  padding: 7px 0 5px;
+  font-size: 17px;
+  line-height: 1;
+}
+.sim__chip--sound:hover { transform: translateY(-1px); }
+.sim__chip--sound.is-muted { opacity: 0.55; }
 
 .sim__status {
   /* Hidden: the end-of-flight feedback stamp now carries win/lose, and

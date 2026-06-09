@@ -1269,17 +1269,33 @@
   // result: { won: true } | { won: false, reason: '…' }
   function showFlightFeedback(result) {
     clearFlightFeedback();
+    // The stamp and the face always agree: win → celebrate (^ ^ eyes +
+    // the on-canvas hop/pirouette/sparkles); any loss that wasn't a
+    // physical crash → confused. A crash already set its dizzy face (and
+    // the tumble), so don't overwrite it.
+    if (result.won) {
+      drone.celebrate();
+    } else if (!drone._crash) {
+      drone.setFace('confused');
+      window.DroneSound?.uhOh();   // the crash already made its own noise
+    }
     const card = document.createElement('div');
     card.className = 'feedback-card';
 
     if (result.won) {
-      feedbackEl.style.setProperty('--feedback-accent', 'var(--logic)');
-      feedbackEl.dataset.state = 'win';
-      card.innerHTML =
-        `<p class="feedback-card__title">${pick(WIN_TITLES)}</p>` +
-        `<p class="feedback-card__flourish">${pick(WIN_FLOURISHES)}</p>`;
-      feedbackEl.appendChild(card);
-      spawnSparkles(card);
+      // Hold the stamp back so the drone's own celebration plays first —
+      // the card thunks down center-canvas and would cover it. The timer
+      // rides feedbackTimer, so clearFlightFeedback (next fly!/reset/level
+      // switch) cancels a pending stamp too.
+      feedbackTimer = setTimeout(() => {
+        feedbackEl.style.setProperty('--feedback-accent', 'var(--logic)');
+        feedbackEl.dataset.state = 'win';
+        card.innerHTML =
+          `<p class="feedback-card__title">${pick(WIN_TITLES)}</p>` +
+          `<p class="feedback-card__flourish">${pick(WIN_FLOURISHES)}</p>`;
+        feedbackEl.appendChild(card);
+        spawnSparkles(card);
+      }, 750);
     } else {
       feedbackEl.style.setProperty('--feedback-accent', 'var(--flight)');
       feedbackEl.dataset.state = 'lose';
@@ -1294,6 +1310,9 @@
   }
 
   runBtn.addEventListener('click', async () => {
+    // Browsers only allow audio after a user gesture — this click is one,
+    // so the sound engine wakes up here (no-op once running).
+    window.DroneSound?.unlock();
     // Any button press clears a lingering stamp first, so a previous
     // result (or the empty-plan nudge below) never bleeds into the
     // next run.
@@ -1355,6 +1374,7 @@
         // Win/lose now lives on the canvas stamp, not the status pill.
         // Drop the pill back to neutral on a win (no stale "flying…"),
         // keep the reason on the pill for a loss as a quiet secondary.
+        // (faces are set by showFlightFeedback, alongside the stamp)
         if (result.won) drone._setStatus('ready when you are', 'idle');
         else            drone._setStatus(result.reason, 'stopped');
         showFlightFeedback(result);
@@ -1448,6 +1468,22 @@
   document.getElementById('zoom-in') .addEventListener('click', () => applyCanvasZoom(drone._zoom * 1.25));
   document.getElementById('zoom-out').addEventListener('click', () => applyCanvasZoom(drone._zoom / 1.25));
   applyCanvasZoom(1.0);
+
+  // ----- Sound toggle ------------------------------------------------------
+  const soundBtn = document.getElementById('sound-btn');
+  function renderSoundBtn() {
+    const muted = !!window.DroneSound?.muted;
+    soundBtn.textContent = muted ? '🔇' : '🔊';
+    soundBtn.classList.toggle('is-muted', muted);
+  }
+  soundBtn.addEventListener('click', () => {
+    const s = window.DroneSound;
+    if (!s) return;
+    s.unlock();              // a click is a gesture — safe to start audio
+    s.setMuted(!s.muted);
+    renderSoundBtn();
+  });
+  renderSoundBtn();
 
   // ----- Canvas pan (drag to look around) --------------------------------
   let panActive = false;
