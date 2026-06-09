@@ -48,6 +48,11 @@
       zones: [
         { kind: 'target', x_cm: 0, y_cm: -150, w_cm: 40, h_cm: 40, color: 'green' },
       ],
+      // Ink doodles in the margins — decoration only (see _drawDecor).
+      decor: [
+        { kind: 'grass',  x_cm: -80, y_cm:  -45, s: 1.2 },
+        { kind: 'flower', x_cm:  70, y_cm: -120 },
+      ],
       win: { type: 'land_in_zone', zone: 0 },
     },
     {
@@ -86,6 +91,10 @@
         { kind: 'wall',   x_cm: 0, y_cm: -30, w_cm: 80, h_cm: 12, over_height_cm: 30 },
         { kind: 'beam',   x_cm: 0, y_cm: -90, w_cm: 80, h_cm: 12, under_height_cm: 60 },
         { kind: 'target', x_cm: 0, y_cm: -180, w_cm: 30, h_cm: 30, color: 'green' },
+      ],
+      decor: [
+        { kind: 'pebbles', x_cm: -85, y_cm:  -75, s: 1.2 },
+        { kind: 'grass',   x_cm:  85, y_cm: -190, s: 1.1, r: 0.1 },
       ],
       win: { type: 'land_in_zone', zone: 2 },
     },
@@ -239,6 +248,10 @@
         // Goal.
         { kind: 'target', x_cm: 120, y_cm: -120, w_cm: 30, h_cm: 30, color: 'green' },
       ],
+      decor: [
+        { kind: 'grass',  x_cm: -60, y_cm: -100, s: 1.2 },
+        { kind: 'flower', x_cm: 170, y_cm:  -35 },
+      ],
       win: { type: 'land_in_zone', zone: 18 },
     },
     {
@@ -325,16 +338,19 @@
       win: { type: 'pickup_then_land', pickup: [18, 19, 20, 21, 22], zone: 23 },
     },
     {
-      // First "fly until" level: a wall straight ahead (8.5 units out)
-      // with the landing area on the grid line just before it (8 units).
-      // "fly until wall ahead" creeps up and stops half a unit short —
-      // right on the green. Only the wall_ahead condition here.
+      // First "fly until" level: a wall straight ahead (9 units out) with
+      // the landing area on the grid line the drone stops on (8 units).
+      // The wall sits a full cell past the stop so its brick face never
+      // crowds the green. It's a solid BARRIER (no height number) — the
+      // palette has no fly_up/fly_down here, so a height would be
+      // meaningless, and a crash gets the honest "too tall to fly over"
+      // message instead of advice the kid can't follow. Only wall_ahead.
       id: 9,
       caption: "Fly until you reach the wall, then land!",
       palette: ['take_off', 'fly_until', 'wall_ahead', 'land'],
       zones: [
-        { kind: 'wall',   x_cm: 0, y_cm: -255, w_cm: 90, h_cm: 12, over_height_cm: 60 },
-        { kind: 'target', x_cm: 0, y_cm: -240, w_cm: 60, h_cm: 30, color: 'green' },
+        { kind: 'barrier', x_cm: 0, y_cm: -270, w_cm: 90, h_cm: 12 },
+        { kind: 'target',  x_cm: 0, y_cm: -240, w_cm: 60, h_cm: 30, color: 'green' },
       ],
       win: { type: 'land_in_zone', zone: 1 },
     },
@@ -349,8 +365,11 @@
                 'turn_left', 'turn_right', 'land'],
       home_x_frac: 0.2,   // start bottom-left — climb then head right
       zones: [
-        { kind: 'wall',   x_cm:   0, y_cm: -255, w_cm: 90, h_cm: 12, over_height_cm: 60 },
-        { kind: 'target', x_cm: 120, y_cm: -240, w_cm: 50, h_cm: 50, color: 'green' },
+        // Solid barrier a full cell past the 8-unit stop line, like L9 —
+        // no height number (no fly_up/fly_down in this palette either),
+        // and the brick face stays clear of the path (same grid-stop).
+        { kind: 'barrier', x_cm:   0, y_cm: -270, w_cm: 90, h_cm: 12 },
+        { kind: 'target',  x_cm: 120, y_cm: -240, w_cm: 50, h_cm: 50, color: 'green' },
       ],
       win: { type: 'land_in_zone', zone: 1 },
     },
@@ -412,6 +431,11 @@
         // NB: no wall below the pad — the final leg has nothing to bump into,
         // so the last stop must be "fly until gone 2" (count the distance).
       ],
+      decor: [
+        { kind: 'grass',   x_cm: -45, y_cm: -195, s: 1.2 },
+        { kind: 'flower',  x_cm: -50, y_cm:  -90 },
+        { kind: 'pebbles', x_cm:  30, y_cm: -245 },
+      ],
       win: { type: 'pickup_then_land', pickup: [0, 1, 2, 3, 4, 5], zone: 6 },
     },
     {
@@ -419,6 +443,11 @@
       caption: "Sandbox — fly anywhere!",
       palette: ALL_BLOCKS,
       zones: [],
+      decor: [
+        { kind: 'grass',   x_cm: -90, y_cm:  -30, s: 1.2 },
+        { kind: 'flower',  x_cm:  80, y_cm: -150 },
+        { kind: 'pebbles', x_cm: -40, y_cm: -250, s: 1.1 },
+      ],
       win: { type: 'land_anywhere' },
       // No zones to fit — start the canvas zoomed out enough to see ~8
       // units of forward distance, so a long flight stays on screen.

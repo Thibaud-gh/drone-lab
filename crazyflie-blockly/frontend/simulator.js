@@ -761,6 +761,9 @@ class SimDrone {
 
     // Layered draw, back-to-front, so altitude reads correctly:
     //   floor → trail → walls → drone → beams
+    // 0. Decorative ink doodles — set dressing, behind everything.
+    this._drawDecor(ctx);
+
     // 1. Floor: target outlines, wall footprints, beam ground-shadows.
     this._drawZonesFloor(ctx);
 
@@ -892,11 +895,83 @@ class SimDrone {
     if (shaking) ctx.restore();
   }
 
+  // Decorative ink doodles (level.decor) — pure set dressing, drawn behind
+  // everything in the margins of a level. The semantic rule that keeps the
+  // canvas readable: COLOUR means it matters (zones, obstacles, parcels),
+  // faint monochrome ink means decoration. Doodles never collide, never
+  // block, never win. Schema: {kind: 'grass'|'flower'|'pebbles', x_cm,
+  // y_cm, s?: scale, r?: rotation}.
+  _drawDecor(ctx) {
+    const decor = this._level?.decor;
+    if (!decor?.length) return;
+    for (const d of decor) {
+      const x = this._pxX(d.x_cm ?? 0), y = this._pxY(d.y_cm ?? 0);
+      const s = (d.s ?? 1) * this._zoom;
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(d.r ?? 0);
+      ctx.scale(s, s);
+      ctx.strokeStyle = 'rgba(26,42,64,0.30)';
+      ctx.fillStyle = 'rgba(26,42,64,0.18)';
+      ctx.lineWidth = 1.6;
+      ctx.lineCap = 'round';
+      if (d.kind === 'grass') {
+        // a tuft — three blades fanning up from one spot
+        ctx.beginPath();
+        ctx.moveTo(0, 0); ctx.quadraticCurveTo(-3, -7, -7, -10);
+        ctx.moveTo(0, 0); ctx.quadraticCurveTo(-1, -8, 0, -13);
+        ctx.moveTo(0, 0); ctx.quadraticCurveTo(3, -7, 7, -9);
+        ctx.stroke();
+      } else if (d.kind === 'flower') {
+        // a daisy — stem, six petal loops, filled centre
+        ctx.beginPath();
+        ctx.moveTo(0, 16); ctx.quadraticCurveTo(-2.5, 10, 0, 5);
+        ctx.stroke();
+        for (let i = 0; i < 6; i++) {
+          const a = (i * Math.PI * 2) / 6;
+          ctx.beginPath();
+          ctx.arc(Math.cos(a) * 4.5, Math.sin(a) * 4.5 - 2, 2.6, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        ctx.beginPath();
+        ctx.arc(0, -2, 1.9, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (d.kind === 'pebbles') {
+        // a little cluster of three stones
+        ctx.beginPath(); ctx.ellipse(-4,  0, 4,   2.8,  0.2, 0, Math.PI * 2); ctx.stroke();
+        ctx.beginPath(); ctx.ellipse( 3,  2, 3,   2.2, -0.3, 0, Math.PI * 2); ctx.stroke();
+        ctx.beginPath(); ctx.ellipse( 2, -4, 2.2, 1.6,  0.5, 0, Math.PI * 2); ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
+
   // 1st pass — things that live on the floor (target outlines + beam
   // ground-shadows + wall footprint outlines). Drawn before trail/drone
   // so they sit at the back.
   _drawZonesFloor(ctx) {
     if (!this._level || !this._level.zones?.length) return;
+    // Ground shadows under walls/barriers — where they actually sit (the
+    // real crash zone). Each pass is ONE path so the overlapping rects of
+    // a merged group don't double-darken; two passes fake the soft edge.
+    const solid = this._level.zones.filter(z => z.kind === 'wall' || z.kind === 'barrier');
+    if (solid.length) {
+      const zm = this._zoom;
+      for (const pass of [{ inf: 3 * zm, a: 0.07 }, { inf: 0, a: 0.10 }]) {
+        ctx.save();
+        ctx.fillStyle = `rgba(26,42,64,${pass.a})`;
+        ctx.beginPath();
+        for (const z of solid) {
+          const w = (z.w_cm ?? 30) * PX_PER_CM * zm;
+          const h = (z.h_cm ?? 30) * PX_PER_CM * zm;
+          ctx.rect(this._pxX(z.x_cm ?? 0) - w / 2 + 2 * zm - pass.inf,
+                   this._pxY(z.y_cm ?? 0) - h / 2 + 1.5 * zm - pass.inf,
+                   w + 2 * pass.inf, h + 2 * pass.inf);
+        }
+        ctx.fill();
+        ctx.restore();
+      }
+    }
     for (const z of this._level.zones) {
       const cx = this._pxX(z.x_cm ?? 0);
       const cy = this._pxY(z.y_cm ?? 0);
@@ -987,13 +1062,43 @@ class SimDrone {
       return { x: cx - w/2, y: cy - h/2, w, h };
     });
 
+    // Extruded south faces — one vertical band per member rect, from the
+    // slab's bottom edge down to its footprint. Faces draw BEFORE all
+    // slabs, so a slab further south naturally occludes the face behind
+    // it; face-face overlaps share one colour and vanish.
+    const faces = rects.map(r => ({ x: r.x, y: r.y + r.h, w: r.w, h: liftPx }));
+
     ctx.save();
     // Halo (outline) — sharp corners so internal seams cancel cleanly.
+    // Faces are part of the silhouette, so they get the halo too.
     const halo = 2;
     ctx.fillStyle = '#5C3A24';
-    for (const r of rects) {
+    for (const r of [...rects, ...faces]) {
       ctx.fillRect(r.x - halo, r.y - halo, r.w + 2*halo, r.h + 2*halo);
     }
+    // Face interiors + horizontal mortar courses clipped to their union.
+    ctx.fillStyle = '#7A4F33';
+    for (const f of faces) {
+      ctx.fillRect(f.x, f.y, f.w, f.h);
+    }
+    ctx.save();
+    ctx.beginPath();
+    for (const f of faces) ctx.rect(f.x, f.y, f.w, f.h);
+    ctx.clip();
+    ctx.strokeStyle = 'rgba(60,38,22,0.45)';
+    ctx.lineWidth = 1.2;
+    const courseH = Math.max(8, 9 * this._zoom);
+    const fMinX = Math.min(...faces.map(f => f.x));
+    const fMaxX = Math.max(...faces.map(f => f.x + f.w));
+    const fMinY = Math.min(...faces.map(f => f.y));
+    const fMaxY = Math.max(...faces.map(f => f.y + f.h));
+    ctx.beginPath();
+    for (let y = fMaxY - courseH; y > fMinY; y -= courseH) {
+      ctx.moveTo(fMinX, y);
+      ctx.lineTo(fMaxX, y);
+    }
+    ctx.stroke();
+    ctx.restore();
     // Slab interior.
     ctx.fillStyle = '#A0704D';
     for (const r of rects) {
@@ -1204,6 +1309,29 @@ class SimDrone {
     const liftPx   = heightCm * ALTITUDE_PX_PER_CM * this._zoom;
     const units    = +(heightCm / CM_PER_UNIT).toFixed(1);
     const ySlabMid = cy - liftPx;
+
+    // Extruded south face — the vertical side of the wall, connecting the
+    // slab down to its footprint so the wall reads as a solid 2.5D block
+    // instead of a floating slab. Horizontal mortar courses only (it's a
+    // wall seen side-on). Drawn first; the slab paints over its top edge.
+    ctx.save();
+    ctx.fillStyle = '#7A4F33';
+    ctx.strokeStyle = '#5C3A24';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.rect(cx - w/2, ySlabMid + h/2, w, liftPx);
+    ctx.fill();
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(60,38,22,0.45)';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    const courseH = Math.max(8, 9 * this._zoom);
+    for (let y = ySlabMid + h/2 + courseH; y < ySlabMid + h/2 + liftPx; y += courseH) {
+      ctx.moveTo(cx - w/2, y);
+      ctx.lineTo(cx + w/2, y);
+    }
+    ctx.stroke();
+    ctx.restore();
 
     // brick slab at altitude
     ctx.save();
