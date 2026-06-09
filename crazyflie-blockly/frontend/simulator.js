@@ -132,6 +132,25 @@ class SimDrone {
     this._leanTarget = 0;
     this._leanX = 0;
     this._leanV = 0;
+    // Parcels — one little box per pickup zone. A pure visual layer over
+    // _pickedUpZones (win logic untouched): each box WAITS on its zone,
+    // is CARRIED on the string in collection order, gets DELIVERED into a
+    // tidy grid when the drone lands on a target, and SCATTERS on a crash.
+    // Carried boxes are damped followers of each other, integrated in
+    // _loop like the lean spring.
+    this._parcels = (this._level?.zones ?? [])
+      .map((z, i) => ({ z, i }))
+      .filter(({ z }) => z.kind === 'pickup')
+      .map(({ z, i }) => ({
+        zoneIdx: i,
+        state: 'waiting',
+        x: z.x_cm ?? 0, y: z.y_cm ?? 0,     // current world pos (cm)
+        tx: z.x_cm ?? 0, ty: z.y_cm ?? 0,   // settle target (delivered/scattered)
+        vx: 0, vy: 0,
+        h: 0,                               // current hang height (cm)
+        rot: (((i * 37) % 10) - 5) * 0.02,  // deterministic tiny tilt
+      }));
+    this._carry = [];   // zoneIdx of carried/delivered boxes, collection order
     window.DroneSound?.stopAll();
     this._setStatus('ready when you are', 'idle');
     this._updateHud();
@@ -163,6 +182,14 @@ class SimDrone {
 
   stop() { this._stopped = true; }
 
+  // Restore hover rotor speed at the end of a move — unless the move
+  // ended in a failure. A crash cut the rotors (they stay dead, and the
+  // hum dies with them); leaving them untouched on any error keeps the
+  // sound consistent with what the kid sees.
+  _settleRotors() {
+    if (!this._lastError) this._rotorSpeed = 20;
+  }
+
   // Set when a flight rule is broken (e.g. forward without takeoff). Persists
   // through the rest of the program so the kid sees a single clear message
   // at the end, not the last successful step. Rule errors get a confused
@@ -186,6 +213,17 @@ class SimDrone {
       at: performance.now(),
       dir: Math.random() < 0.5 ? -1 : 1,   // which way it tips
     };
+    // The train scatters — carried boxes get tossed around the crash site
+    // and lie there with the tumbled drone until reset.
+    (this._carry ?? []).forEach((zi, k) => {
+      const p = this._parcels.find(pp => pp.zoneIdx === zi);
+      if (!p || p.state !== 'carried') return;
+      p.state = 'scattered';
+      const a = k * 2.4 + this._crash.dir * 0.7;
+      p.tx = this.x_cm + Math.cos(a) * (10 + k * 5);
+      p.ty = this.y_cm + Math.sin(a) * (8 + k * 4);
+      p.rot = (((k * 53) % 10) - 5) * 0.09;
+    });
     window.DroneSound?.crash();
   }
 
@@ -264,12 +302,18 @@ class SimDrone {
     this.flying = true;
     this._setStatus('taking off', 'flying');
     this._dustPuff();   // rotor wash kicks up the ground
+    // Pick the train back up — "delivered" only counts while the drone
+    // sits on the pad; flying off again re-hooks the boxes to the string.
+    for (const zi of this._carry) {
+      const p = this._parcels.find(pp => pp.zoneIdx === zi);
+      if (p && p.state === 'delivered') p.state = 'carried';
+    }
     await this._tween(this.height, 30, 800, (v) => {
       this.height = v;
       this._checkCrash();
     }, () => this._rotorSpeed = 30);
     if (gen !== this._gen) return;
-    this._rotorSpeed = 20;
+    this._settleRotors();
   }
 
   async land() {
@@ -291,15 +335,43 @@ class SimDrone {
     // If we landed inside any pickup zone, remember it — pickup-and-deliver
     // levels read this in evaluateWin to confirm the package was collected.
     if (this._level?.zones?.length) {
+      const inZone = (z) =>
+        Math.abs(this.x_cm - (z.x_cm ?? 0)) <= (z.w_cm ?? 30) / 2 &&
+        Math.abs(this.y_cm - (z.y_cm ?? 0)) <= (z.h_cm ?? 30) / 2;
       this._level.zones.forEach((z, i) => {
-        if (z.kind !== 'pickup') return;
-        const hw = (z.w_cm ?? 30) / 2;
-        const hh = (z.h_cm ?? 30) / 2;
-        if (Math.abs(this.x_cm - (z.x_cm ?? 0)) <= hw &&
-            Math.abs(this.y_cm - (z.y_cm ?? 0)) <= hh) {
-          this._pickedUpZones.add(i);
+        if (z.kind !== 'pickup' || !inZone(z)) return;
+        // First landing here: the waiting box hops onto the string.
+        if (!this._pickedUpZones.has(i)) {
+          const p = this._parcels.find(pp => pp.zoneIdx === i);
+          if (p && p.state === 'waiting') {
+            p.state = 'carried';
+            this._carry.push(i);
+            window.DroneSound?.pickup();
+          }
         }
+        this._pickedUpZones.add(i);
       });
+      // Landing on a target with the train attached: set the boxes down
+      // in a tidy grid on the pad (≤3 per row, centred).
+      const target = this._level.zones.find((z) =>
+        (z.kind ?? 'target') === 'target' && inZone(z));
+      if (target) {
+        const carried = this._carry
+          .map(zi => this._parcels.find(pp => pp.zoneIdx === zi))
+          .filter(p => p && p.state === 'carried');
+        const n = carried.length;
+        const cols = Math.min(3, n);
+        carried.forEach((p, k) => {
+          p.state = 'delivered';
+          const row = Math.floor(k / cols), col = k % cols;
+          const rowsN = Math.ceil(n / cols);
+          const rowCols = Math.min(cols, n - row * cols);
+          // Grid sits a little south of the pad centre so the boxes line
+          // up in FRONT of the parked drone instead of underneath it.
+          p.tx = (target.x_cm ?? 0) + (col - (rowCols - 1) / 2) * 11;
+          p.ty = (target.y_cm ?? 0) + 12 + (row - (rowsN - 1) / 2) * 10;
+        });
+      }
     }
   }
 
@@ -327,7 +399,7 @@ class SimDrone {
     });
     this._leanTarget = 0;
     if (gen !== this._gen) return;
-    this._rotorSpeed = 20;
+    this._settleRotors();
   }
 
   // Append the current position to the trail once it has moved ≥2 cm
@@ -408,11 +480,22 @@ class SimDrone {
     const SPEED_MIN = 18;  // arrival creep — slow enough to stop gently
     this._rotorSpeed = 36;
 
-    // Grid line to stop on if there's a wall dead ahead.
+    // Does this leg's condition actually read the wall sensor? Probe the
+    // predicate once: wallAhead() stamps _senseAt, so a stamp fresher than
+    // the probe means the program is looking at walls. Only THEN do we
+    // arrange the polite grid-aligned stop at a wall ahead — a leg that
+    // only counts distance ("gone N units") flies blind and CRASHES into
+    // the wall like any other forward flight (the kid told it to watch
+    // the odometer, not the wall).
+    const senseMark = performance.now();
+    try { predicate(); } catch (_) {}
+    const sensesWalls = this._senseAt !== null && this._senseAt >= senseMark;
+
+    // Grid line to stop on if there's a wall dead ahead (sensed legs only).
     const onX  = Math.abs(dx) >= Math.abs(dy);     // travelling along x?
     const sign = onX ? Math.sign(dx) : Math.sign(dy);
     let gridStop = null;                            // world coord on the travel axis
-    const wallDist = this._distanceAheadCm();       // to the wall's near face
+    const wallDist = sensesWalls ? this._distanceAheadCm() : Infinity;
     if (Number.isFinite(wallDist)) {
       const startCoord = onX ? this.x_cm : this.y_cm;
       const clearEdge  = startCoord + sign * (wallDist - DRONE_RADIUS_CM);
@@ -467,6 +550,7 @@ class SimDrone {
     this._leanTarget = 0;
     if (this._gen !== gen) return;
     if (outcome === 'toofar') {
+      this._rotorSpeed = 20;   // it hovers there, lost — hum drops to idle
       this._fail("the drone kept flying and flying — it never found what it was looking for!");
       return;
     }
@@ -490,7 +574,7 @@ class SimDrone {
         this._setStatus('flying forward…', 'flying');
       }
     }
-    this._rotorSpeed = 20;
+    this._settleRotors();
   }
 
   async up(units) {
@@ -508,7 +592,7 @@ class SimDrone {
       this._checkCrash();
     });
     if (gen !== this._gen) return;
-    this._rotorSpeed = 20;
+    this._settleRotors();
   }
 
   async down(units) {
@@ -534,7 +618,7 @@ class SimDrone {
       this._crashFail('crash! the drone fell to the floor — use land to come down gently!');
       return;
     }
-    this._rotorSpeed = 20;
+    this._settleRotors();
   }
 
   async turn_left() {
@@ -553,7 +637,7 @@ class SimDrone {
       this.heading = start + (target - start) * turnEase(t);
     });
     if (gen !== this._gen) return;
-    this._rotorSpeed = 20;
+    this._settleRotors();
   }
 
   async turn_right() {
@@ -572,7 +656,7 @@ class SimDrone {
       this.heading = start + (target - start) * turnEase(t);
     });
     if (gen !== this._gen) return;
-    this._rotorSpeed = 20;
+    this._settleRotors();
   }
 
   // -----------------------------------------------------
@@ -633,6 +717,7 @@ class SimDrone {
     const sdt = Math.min(dt, 0.05);
     this._leanV += (60 * (this._leanTarget - this._leanX) - 8 * this._leanV) * sdt;
     this._leanX += this._leanV * sdt;
+    this._updateParcels(sdt);
     window.DroneSound?.update(this._rotorSpeed);
     this._updateHud();
     this._draw();
@@ -770,6 +855,9 @@ class SimDrone {
     //     actively reading the wall sensor; also hosts the found-it ping.
     this._drawSenseBeam(ctx, px, py_drone);
 
+    // 3c. The package train — string + carried boxes, just under the drone.
+    this._drawTrain(ctx, px, py_drone);
+
     // 4. Drone marker.
     this._drawDrone(ctx, px, py_drone, visH);
 
@@ -818,6 +906,12 @@ class SimDrone {
       if      (kind === 'target') this._drawTarget(ctx, cx, cy, w, h, z);
       else if (kind === 'pickup') this._drawPickup(ctx, cx, cy, w, h, z, this._level.zones.indexOf(z));
       else if (kind === 'beam')   this._drawBeamShadow(ctx, cx, cy, w, h);
+    }
+    // Parcels on the floor — waiting on their zones, delivered on the pad,
+    // or scattered after a crash. Carried ones are drawn with the drone
+    // (see _drawTrain).
+    for (const p of this._parcels ?? []) {
+      if (p.state !== 'carried') this._drawParcel(ctx, p);
     }
   }
 
@@ -999,8 +1093,9 @@ class SimDrone {
     ctx.restore();
   }
 
-  // Pickup zone — marigold square with a 📦 emoji. When already collected,
-  // it fades out so the kid sees the package is gone.
+  // Pickup zone — marigold dashed square. The box itself is a parcel
+  // (drawn by the parcel pass), so once collected the zone is just a
+  // faded empty outline — the box is visibly elsewhere now.
   _drawPickup(ctx, cx, cy, w, h, _z, idx) {
     const collected = idx >= 0 && this._pickedUpZones?.has(idx);
     ctx.save();
@@ -1012,12 +1107,78 @@ class SimDrone {
     this._roundRect(ctx, cx - w/2, cy - h/2, w, h, 10);
     ctx.fill();
     ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.font = `${Math.min(w, h) * 0.6}px "Apple Color Emoji", "Segoe UI Emoji", sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('📦', cx, cy);
     ctx.restore();
+  }
+
+  // One little parcel — a kraft cardboard box seen from above: lid-flap
+  // seam, packing tape across it, and a small address label. `tilt` adds
+  // a velocity-based swing lean for carried boxes.
+  _drawParcel(ctx, p, tilt = 0) {
+    const z = this._zoom;
+    const px = this._pxX(p.x);
+    const py = this._pxY(p.y) - p.h * ALTITUDE_PX_PER_CM * z;
+    // Waiting boxes draw at double size — an easy-to-spot goal on the
+    // floor. Once picked they shrink to travel size (the swap happens
+    // while the landed drone covers the zone, so there's no visible pop).
+    const s = (p.state === 'waiting' ? 32 : 16) * z;
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(p.rot + tilt);
+    // cardboard body
+    ctx.fillStyle = '#C9985A';
+    ctx.strokeStyle = '#7A5226';
+    ctx.lineWidth = Math.max(1.2, 1.5 * z);
+    this._roundRect(ctx, -s / 2, -s / 2, s, s, 2.5 * z);
+    ctx.fill();
+    ctx.stroke();
+    // seam where the two lid flaps meet
+    ctx.strokeStyle = 'rgba(122,82,38,0.55)';
+    ctx.lineWidth = Math.max(0.8, 1 * z);
+    ctx.beginPath();
+    ctx.moveTo(-s / 2, 0); ctx.lineTo(s / 2, 0);
+    ctx.stroke();
+    // packing tape across the seam
+    ctx.fillStyle = 'rgba(255,251,238,0.78)';
+    ctx.fillRect(-s * 0.14, -s / 2, s * 0.28, s);
+    ctx.strokeStyle = 'rgba(122,82,38,0.35)';
+    ctx.beginPath();
+    ctx.moveTo(-s * 0.14, -s / 2); ctx.lineTo(-s * 0.14, s / 2);
+    ctx.moveTo( s * 0.14, -s / 2); ctx.lineTo( s * 0.14, s / 2);
+    ctx.stroke();
+    // little address label, bottom-right
+    ctx.fillStyle = '#FFFBEE';
+    ctx.strokeStyle = '#7A5226';
+    ctx.lineWidth = Math.max(0.7, 0.8 * z);
+    ctx.fillRect(s * 0.18, s * 0.16, s * 0.28, s * 0.2);
+    ctx.strokeRect(s * 0.18, s * 0.16, s * 0.28, s * 0.2);
+    ctx.restore();
+  }
+
+  // String + carried boxes, drawn just beneath the drone. The string runs
+  // drone → box → box…, curving naturally from the follower lag.
+  _drawTrain(ctx, px, py_drone) {
+    const carried = (this._carry ?? [])
+      .map(zi => this._parcels.find(p => p.zoneIdx === zi))
+      .filter(p => p && p.state === 'carried');
+    if (!carried.length) return;
+    const z = this._zoom;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(26,42,64,0.55)';
+    ctx.lineWidth = 1.4 * z;
+    ctx.beginPath();
+    ctx.moveTo(px, py_drone);
+    for (const p of carried) {
+      ctx.lineTo(this._pxX(p.x), this._pxY(p.y) - p.h * ALTITUDE_PX_PER_CM * z);
+    }
+    ctx.stroke();
+    ctx.restore();
+    // boxes — last first, so the box nearest the drone draws on top when
+    // the train bunches up while hovering
+    for (let i = carried.length - 1; i >= 0; i--) {
+      const p = carried[i];
+      const tilt = Math.max(-0.35, Math.min(0.35, p.vx * 0.004));
+      this._drawParcel(ctx, p, tilt);
+    }
   }
 
   // Beam casts a shadow on the floor at its world position. Drawn in
@@ -1336,6 +1497,45 @@ class SimDrone {
       ctx.stroke();
     }
     ctx.restore();
+  }
+
+  // The package train. Each carried box is a damped follower of the box
+  // ahead of it (the first follows the drone), so the train streams out
+  // behind the drone in flight and bunches beneath it while hovering.
+  // Springs get stiffer deeper into the chain so the tail doesn't whip.
+  // The hang reads through each box's height: gaps shrink when there
+  // isn't enough altitude for the whole train (six boxes at 1 unit pack
+  // tight; fly up 2 and the train stretches out).
+  _updateParcels(dt) {
+    if (!this._parcels?.length || !this._carry?.length) return;
+    const carriedCount = this._carry.reduce((n, zi) => {
+      const p = this._parcels.find(pp => pp.zoneIdx === zi);
+      return n + (p && p.state === 'carried' ? 1 : 0);
+    }, 0);
+    const gap = Math.min(10, this.height / (carriedCount + 1));
+    let leadX = this.x_cm, leadY = this.y_cm, leadH = this.height;
+    let depth = 0;
+    for (const zi of this._carry) {
+      const p = this._parcels.find(pp => pp.zoneIdx === zi);
+      if (!p) continue;
+      if (p.state === 'carried') {
+        const k = 40 + depth * 18;
+        const damp = 2 * Math.sqrt(k) * 0.55;   // underdamped → swing
+        p.vx += (k * (leadX - p.x) - damp * p.vx) * dt;
+        p.vy += (k * (leadY - p.y) - damp * p.vy) * dt;
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.h += (Math.max(0, leadH - gap) - p.h) * Math.min(1, dt * 8);
+        leadX = p.x; leadY = p.y; leadH = p.h;
+        depth++;
+      } else if (p.state === 'delivered' || p.state === 'scattered') {
+        // settle onto the floor target
+        p.x += (p.tx - p.x) * Math.min(1, dt * 7);
+        p.y += (p.ty - p.y) * Math.min(1, dt * 7);
+        p.h += (0 - p.h) * Math.min(1, dt * 8);
+        p.vx = 0; p.vy = 0;
+      }
+    }
   }
 
   // One short puff of rotor-wash dust at the drone's ground position —

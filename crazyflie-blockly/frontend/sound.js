@@ -166,6 +166,14 @@
       this._tone(f, this.ctx.currentTime, 0.07, { type: 'sine', gain: 0.07 });
     }
 
+    // Cheerful little pop when a package hops onto the string.
+    pickup() {
+      if (!this._ready()) return;
+      const t = this.ctx.currentTime;
+      this._tone(520, t, 0.09, { type: 'sine', gain: 0.12, glideTo: 740 });
+      this._tone(880, t + 0.07, 0.12, { type: 'sine', gain: 0.1 });
+    }
+
     // "Found it!" chirp when a sensed fly-until leg stops at its wall.
     found() {
       if (!this._ready()) return;
