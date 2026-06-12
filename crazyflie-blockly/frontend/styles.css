@@ -290,6 +290,20 @@ body {
   box-shadow: 0 1px 0 var(--ink);
 }
 
+/* undo sits to the left of start-over, counter-rotated, and its hover
+   stays ink (undo isn't destructive — no red) */
+.card__action--undo {
+  right: 138px;
+  transform: rotate(-1.4deg);
+}
+.card__action--undo:hover {
+  transform: rotate(-1.4deg) translateY(-1px);
+  color: var(--ink);
+}
+.card__action--undo:active {
+  transform: rotate(-1.4deg) translateY(2px);
+}
+
 /* -----------------------------------------------------------
    Main stage — three panels
    ----------------------------------------------------------- */
@@ -460,6 +474,79 @@ body {
   color: var(--paper);
 }
 
+/* Chapter tabs — always visible at the top of the column; selecting one
+   shows that chapter's levels below (labelled 2.1, 2.2, …). Sage-tinted
+   and squatter so they read as a different "kind" than the level tabs. */
+.chapter-tab {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 16px;
+  width: 44px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #E8EFE3;
+  color: var(--ink-soft);
+  border: 2px solid var(--ink);
+  border-radius: 0 10px 10px 0;
+  border-left: 0;
+  cursor: pointer;
+  box-shadow: 2px 3px 0 rgba(26,42,64,0.4);
+  transition: transform 120ms ease, background 200ms, color 200ms;
+}
+.chapter-tab:nth-child(odd)  { transform: rotate(-1.3deg); }
+.chapter-tab:nth-child(even) { transform: rotate(1.4deg); }
+.chapter-tab:hover { background: #D7E4CF; color: var(--ink); }
+.chapter-tab.is-active {
+  background: var(--sensor);
+  color: var(--paper);
+}
+/* accordion spacing: the expanded chapter's level tabs sit directly under
+   their chapter tab, nudged right so they read as nested; the next
+   chapter tab gets breathing room after the expanded list */
+.level-tab:not(.level-tab--sandbox) { margin-left: 7px; }
+.level-tab + .chapter-tab { margin-top: 10px; }
+
+/* solved star — a marigold star pinned to the tab's top corner once the
+   level is beaten (chapter tabs get one when ALL their levels are).
+   Tabs need position for the pseudo-element to anchor to. */
+.level-tab, .chapter-tab { position: relative; }
+.level-tab.is-solved::after,
+.chapter-tab.is-solved::after {
+  content: '★';
+  position: absolute;
+  top: -15px;
+  right: -6px;
+  font-size: 23px;
+  line-height: 1;
+  color: var(--logic);
+  text-shadow: 0 1px 0 rgba(26,42,64,0.6);
+  transform: rotate(14deg);
+}
+
+/* "start fresh" — the one destructive control, parked just below the
+   grown-ups drawer, right-aligned with its edge. Quiet dashed chip until
+   hovered; asks for confirmation on click. */
+.page-reset {
+  display: block;
+  margin: 0 40px 18px auto;   /* 40px matches the drawer's side margin */
+  padding: 5px 12px;
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-soft);
+  background: none;
+  border: 1.5px dashed rgba(26,42,64,0.3);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: color 160ms, border-color 160ms;
+}
+.page-reset:hover {
+  color: var(--stop);
+  border-color: var(--stop);
+}
+
 /* Sandbox tab — anchored to the bottom of the tab column (via
    margin-top:auto in the flex container) and marigold-tinted so it
    reads as "free play, not a challenge". */
@@ -552,6 +639,13 @@ body {
 .drone-running-clone {
   filter: drop-shadow(0 0 6px rgba(31, 122, 122, 0.95))
           drop-shadow(0 0 14px rgba(31, 122, 122, 0.7));
+}
+/* When the flight ends in a failure, the block that was executing keeps
+   its glow — switched to red, so "which block did it" is part of the
+   feedback. Persists like the stamp; cleared on reset (endRunVisuals). */
+.drone-running-overlay.is-culprit .drone-running-clone {
+  filter: drop-shadow(0 0 6px rgba(208, 69, 67, 0.95))
+          drop-shadow(0 0 14px rgba(208, 69, 67, 0.7));
 }
 
 /* ============================================================

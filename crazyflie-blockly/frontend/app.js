@@ -92,7 +92,9 @@
       const root = lastActive.getSvgRoot?.();
       if (root) root.classList.remove('drone-active');
     }
-    lastActive = blk && blk.workspace ? blk : null;
+    // Reject disposed blocks too — a block deleted as part of a chain
+    // keeps a truthy .workspace, so .workspace alone is not enough.
+    lastActive = blk && blk.workspace && !blk.disposed ? blk : null;
     if (lastActive) {
       const root = lastActive.getSvgRoot?.();
       if (root) root.classList.add('drone-active');
@@ -431,7 +433,16 @@
       newBlk = workspace.newBlock(type);
       newBlk.initSvg();
       newBlk.render();
-      anchorBlock(newBlk);
+      try {
+        anchorBlock(newBlk);
+      } catch (err) {
+        // Belt and braces: a bad anchor must NEVER eat the kid's click —
+        // a block has to appear no matter what. Drop the anchor and
+        // re-place via the (exception-free) no-anchor path.
+        console.warn('insertBlock: anchoring failed, placing block free', err);
+        setLastActive(null);
+        anchorBlock(newBlk);
+      }
     } finally {
       Blockly.Events.setGroup(false);
     }
@@ -469,7 +480,8 @@
   }
 
   function anchorBlock(newBlk) {
-    let anchor = lastActive && lastActive.workspace ? lastActive : null;
+    const anchorOk = lastActive && lastActive.workspace && !lastActive.disposed;
+    let anchor = anchorOk ? lastActive : null;
 
     // If the active block is a condition (a value block plugged into a
     // slot), treat its containing statement block as the anchor — so
@@ -512,6 +524,19 @@
       const cur = newBlk.getRelativeToSurfaceXY();
       newBlk.moveBy(targetX - cur.x, targetY - cur.y);
       return;
+    }
+
+    // A container anchor swallows the next block: when the glowing block
+    // is a repeat (later: an if), the kid's next tap means "put this
+    // INSIDE it" — so connect at the end of its body, not after the
+    // chain. Once the new block anchors itself, follow-up taps keep
+    // chaining within the body.
+    if (newBlk.previousConnection) {
+      const bodyInput = (anchor.inputList || []).find(isStatementInput);
+      if (bodyInput) {
+        moveBlockToEndOfInput(newBlk, bodyInput);
+        return;
+      }
     }
 
     // walk to bottom of anchor's chain
@@ -633,18 +658,119 @@
   const tabsEl     = document.getElementById('level-tabs');
   let currentLevel = LEVELS[0];
 
+  // Levels are grouped into chapters (level.chapter in levels.js). The tab
+  // column shows the chapter tabs always, then only the levels of the
+  // selected chapter, labelled "2.1", "2.2", … — so the column stays short
+  // as the roster grows. The sandbox ★ lives outside the chapters, pinned
+  // to the bottom as before. Level ids stay 1..N internally (persistence
+  // keys etc.); only the LABEL is chapter-relative.
+  let currentChapter = 1;
+  const CHAPTERS = [...new Set(
+    LEVELS.filter(l => !l.hidden && typeof l.chapter === 'number').map(l => l.chapter)
+  )].sort((a, b) => a - b);
+
+  function chapterOf(id) {
+    const lvl = LEVELS.find(l => l.id === id);
+    return typeof lvl?.chapter === 'number' ? lvl.chapter : null;
+  }
+
+  function levelLabel(lvl) {
+    const sibs = LEVELS.filter(l => l.chapter === lvl.chapter && !l.hidden);
+    return `${lvl.chapter}.${sibs.indexOf(lvl) + 1}`;
+  }
+
+  function makeLevelTab(lvl) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'level-tab' + (lvl.id === 'sandbox' ? ' level-tab--sandbox' : '');
+    btn.dataset.level = String(lvl.id);
+    btn.textContent = lvl.id === 'sandbox' ? '★' : levelLabel(lvl);
+    btn.title = lvl.caption;
+    btn.addEventListener('click', () => setLevel(lvl.id));
+    return btn;
+  }
+
   function buildLevelTabs() {
     tabsEl.innerHTML = '';
-    LEVELS.forEach((lvl) => {
-      if (lvl.hidden) return;   // built but not yet released (e.g. L9 capstone)
+    // Accordion: every chapter tab is always visible; the selected
+    // chapter expands its level tabs directly beneath it, the others
+    // stay collapsed.
+    CHAPTERS.forEach((ch) => {
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = 'level-tab' + (lvl.id === 'sandbox' ? ' level-tab--sandbox' : '');
-      btn.dataset.level = String(lvl.id);
-      btn.textContent = lvl.id === 'sandbox' ? '★' : String(lvl.id);
-      btn.title = lvl.caption;
-      btn.addEventListener('click', () => setLevel(lvl.id));
+      btn.className = 'chapter-tab';
+      btn.dataset.chapter = String(ch);
+      btn.textContent = String(ch);
+      btn.title = `chapter ${ch}`;
+      btn.addEventListener('click', () => {
+        if (currentChapter === ch) return;
+        // Opening a chapter jumps straight to its first level — one tap,
+        // and the accordion re-renders via setLevel.
+        const first = LEVELS.find(l => l.chapter === ch && !l.hidden);
+        if (first) setLevel(first.id);
+      });
       tabsEl.appendChild(btn);
+      if (ch !== currentChapter) return;
+      LEVELS.forEach((lvl) => {
+        if (lvl.hidden || lvl.id === 'sandbox' || lvl.chapter !== ch) return;
+        tabsEl.appendChild(makeLevelTab(lvl));
+      });
+    });
+    // sandbox — pinned to the bottom, outside the chapters
+    const sandbox = LEVELS.find(l => l.id === 'sandbox' && !l.hidden);
+    if (sandbox) tabsEl.appendChild(makeLevelTab(sandbox));
+    refreshSolvedMarkers();
+  }
+
+  // ----- Solved-level stars ----------------------------------------------
+  // A small marigold star on every level tab she has beaten (persisted),
+  // and on a chapter tab once ALL its levels are solved. Sandbox is free
+  // play — there's nothing to complete, so it never gets one.
+  const SOLVED_KEY = 'drone_lab.solved';
+  let solvedLevels = new Set();
+  try { solvedLevels = new Set(JSON.parse(localStorage.getItem(SOLVED_KEY) || '[]')); } catch (_) {}
+
+  function markSolved(id) {
+    if (id === 'sandbox' || solvedLevels.has(String(id))) return;
+    solvedLevels.add(String(id));
+    try { localStorage.setItem(SOLVED_KEY, JSON.stringify([...solvedLevels])); } catch (_) {}
+    refreshSolvedMarkers();
+  }
+
+  // ----- Start fresh (grown-ups drawer) -----------------------------------
+  // Erases every level's saved blocks + scroll, the solved stars and the
+  // last-level memory, then reboots the app clean. Confirmation first —
+  // there's no undo for this one. The sound preference is a device
+  // setting, not progress, so it survives.
+  document.getElementById('reset-progress-btn').addEventListener('click', () => {
+    const ok = window.confirm(
+      "Start completely fresh?\n\nThis erases every level's saved blocks and all the stars. There's no undo."
+    );
+    if (!ok) return;
+    clearTimeout(persistTimer);   // a pending autosave must not resurrect anything
+    try {
+      const doomed = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k === SOLVED_KEY || k === LAST_LEVEL_KEY ||
+            k.startsWith(WORKSPACE_STORAGE_PREFIX) || k.startsWith(SCROLL_STORAGE_PREFIX)) {
+          doomed.push(k);
+        }
+      }
+      doomed.forEach(k => localStorage.removeItem(k));
+    } catch (_) { /* private mode etc. — reload still gives a fresh session */ }
+    location.reload();
+  });
+
+  function refreshSolvedMarkers() {
+    tabsEl.querySelectorAll('.level-tab').forEach(b => {
+      b.classList.toggle('is-solved', solvedLevels.has(b.dataset.level));
+    });
+    tabsEl.querySelectorAll('.chapter-tab').forEach(b => {
+      const ch = Number(b.dataset.chapter);
+      const members = LEVELS.filter(l => l.chapter === ch && !l.hidden);
+      b.classList.toggle('is-solved',
+        members.length > 0 && members.every(l => solvedLevels.has(String(l.id))));
     });
   }
 
@@ -797,11 +923,24 @@
     // flip it again). Reset lastFits so the rescue-recenter can fire.
     lastFits = null;
     restoreWorkspaceForLevel(id);
+    // Scope the undo stack to this level — otherwise the undo button could
+    // resurrect the PREVIOUS level's blocks into this workspace (the
+    // clear+load above are recorded as undoable events). Deferred a tick
+    // because Blockly fires (and records) events asynchronously.
+    setTimeout(() => workspace.clearUndo(), 0);
     refreshCode();
     updateHintVisibility();   // also re-evaluates scroll-lock mobility
-    // mark active tab — compare as strings so 'sandbox' matches
+    // Rebuild the tab column for this level's chapter (sandbox keeps the
+    // last chapter open), then mark the active tabs. Compare as strings
+    // so 'sandbox' matches.
+    const ch = chapterOf(id);
+    if (ch !== null) currentChapter = ch;
+    buildLevelTabs();
     tabsEl.querySelectorAll('.level-tab').forEach(b => {
       b.classList.toggle('is-active', b.dataset.level === String(id));
+    });
+    tabsEl.querySelectorAll('.chapter-tab').forEach(b => {
+      b.classList.toggle('is-active', Number(b.dataset.chapter) === currentChapter);
     });
   }
 
@@ -860,6 +999,13 @@
   const jsGen   = javascript.javascriptGenerator;
 
   function refreshCode() {
+    // Any change to the blocks invalidates a lingering red culprit glow —
+    // the program is different now, so last flight's verdict no longer
+    // points at anything. refreshCode is the single funnel every
+    // block-structure change goes through (the workspace listener for
+    // drags/field edits, and the app's own insert/move/delete/undo ops
+    // call it directly), so this catches them all.
+    clearCulprit();
     const text = pyGen.workspaceToCode(workspace);
     codeOut.innerHTML = text.trim().length
       ? highlightPython(text)
@@ -1001,7 +1147,13 @@
         const blk = workspace.getBlockById(e.blockId);
         if (blk) setLastActive(blk);
       }
-    } else if (e.type === Blockly.Events.BLOCK_DELETE && lastActive && lastActive.id === e.blockId) {
+    } else if (e.type === Blockly.Events.BLOCK_DELETE && lastActive &&
+               (e.blockId === lastActive.id || e.ids?.includes(lastActive.id))) {
+      // e.ids lists EVERY deleted block (a chain deletes its descendants in
+      // one event, blockId is only the top). Missing a descendant here left
+      // lastActive pointing at a disposed block whose .workspace is still
+      // truthy — and the next click-insert would connect the new block
+      // into the dead chain, swallowing it invisibly.
       setLastActive(null);
     } else if (e.type === Blockly.Events.BLOCK_DRAG) {
       // User started a real drag — release the rearrange lock and hide
@@ -1215,8 +1367,22 @@
     originalRepeatCounts.clear();
   }
   function endRunVisuals() {
+    highlightOverlay?.classList.remove('is-culprit');
     highlightBlock(null);
     restoreRepeatCounts();
+  }
+
+  // Drop a lingering red culprit glow (and only that — the teal running
+  // glow is never present at the same time, and a no-op when there's no
+  // culprit keeps this safe to call from refreshCode on every edit).
+  // NOTE: refreshCode's first call is at the IIFE's top level, BEFORE the
+  // highlight `let`s above are initialized — so this looks the overlay up
+  // in the DOM rather than touching those bindings (TDZ).
+  function clearCulprit() {
+    const overlay = document.querySelector('.drone-running-overlay');
+    if (!overlay || !overlay.classList.contains('is-culprit')) return;
+    overlay.classList.remove('is-culprit');
+    highlightBlock(null);
   }
 
   // ----- End-of-flight feedback "stamp" ---------------------------------
@@ -1375,8 +1541,12 @@
         // Drop the pill back to neutral on a win (no stale "flying…"),
         // keep the reason on the pill for a loss as a quiet secondary.
         // (faces are set by showFlightFeedback, alongside the stamp)
-        if (result.won) drone._setStatus('ready when you are', 'idle');
-        else            drone._setStatus(result.reason, 'stopped');
+        if (result.won) {
+          drone._setStatus('ready when you are', 'idle');
+          markSolved(currentLevel.id);   // star on the level tab, persisted
+        } else {
+          drone._setStatus(result.reason, 'stopped');
+        }
         showFlightFeedback(result);
       }
     } catch (err) {
@@ -1387,7 +1557,16 @@
         showFlightFeedback({ won: false, reason });
       }
     } finally {
-      endRunVisuals();
+      // If the flight ended in a failure, keep the block that was
+      // executing lit — in red, so "which block did it" is part of the
+      // feedback. It persists like the stamp and clears with the other
+      // per-flight visuals on reset (setResetMode(false) → endRunVisuals).
+      if (drone._gen === flightGen && drone._lastError && currentHighlightedBlock) {
+        highlightOverlay?.classList.add('is-culprit');
+        restoreRepeatCounts();
+      } else {
+        endRunVisuals();
+      }
     }
   });
 
@@ -1410,6 +1589,18 @@
     updateHintVisibility();
     drone.reset();
     setResetMode(false);
+  });
+
+  // ----- Undo: one visible button (Ctrl+Z is invisible to a 5yo) ---------
+  // Saves the day after the classic motor-skill accidents: a stack torn
+  // apart mid-drag, the wrong block deleted. Blockly tracks the undo
+  // stack already — this just gives it a button.
+  document.getElementById('undo-btn').addEventListener('click', () => {
+    workspace.undo(false);
+    // The click-insert anchor may have been undone out of existence.
+    if (lastActive && !workspace.getBlockById(lastActive.id)) setLastActive(null);
+    refreshCode();
+    updateHintVisibility();
   });
 
   // ----- Mode toggle -----------------------------------------------------

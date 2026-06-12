@@ -43,6 +43,7 @@
   window.LEVELS = [
     {
       id: 1,
+      chapter: 1,
       caption: "Land in the green area",
       palette: ['take_off', 'fly_forward', 'land'],
       zones: [
@@ -57,6 +58,7 @@
     },
     {
       id: 2,
+      chapter: 1,
       caption: "Land in the green area (you'll need to turn!)",
       palette: ['take_off', 'fly_forward', 'turn_left', 'turn_right', 'land'],
       zones: [
@@ -69,6 +71,7 @@
       // carry it to the green zone. The package sits to the LEFT of the
       // start, the delivery zone sits to the RIGHT — same y as L2.
       id: 3,
+      chapter: 1,
       caption: "Pick up the package, then deliver it to the green area",
       // Two landings (pickup + delivery) → uses *_loop flight variants.
       palette: ['take_off_loop', 'fly_forward', 'turn_left', 'turn_right', 'land_loop'],
@@ -85,6 +88,7 @@
       // Solution: take_off → up 1 (h=2) → forward 2 (over wall) →
       // down 1 (h=1) → forward 4 (under beam, into zone) → land.
       id: 4,
+      chapter: 1,
       caption: "Fly OVER the wall and UNDER the beam, then land",
       palette: ['take_off', 'fly_forward', 'fly_up', 'fly_down', 'land'],
       zones: [
@@ -106,6 +110,7 @@
       // walls) → forward 3 → turn_right → forward 3 → turn_left → down 1
       // (drop under beams) → forward 3 → land.
       id: 5,
+      chapter: 1,
       caption: "Escape the walls, sneak under the beams, then land",
       palette: ['take_off', 'fly_forward', 'fly_up', 'fly_down',
                 'turn_left', 'turn_right', 'land'],
@@ -137,6 +142,7 @@
       // first and dropping down to the bottom one. No single intended
       // solution — the point is to notice there are several.
       id: 6,
+      chapter: 1,
       caption: "Fetch both packages, then land up top — there are lots of ways to get there!",
       // Two pickups + a final landing → *_loop flight variants.
       palette: ['take_off_loop', 'fly_forward', 'fly_up', 'fly_down',
@@ -164,6 +170,7 @@
       //   With the loop:  4 visible blocks.
       //   Without:       12 blocks (the same trio four times).
       id: 7,
+      chapter: 2,
       caption: "Grab every package on the way — same hop, again and again. Can repeat help?",
       // Four landings (3 pickups + delivery) → uses *_loop variants so
       // take_off / land can live inside the repeat body.
@@ -185,6 +192,7 @@
       // Solution: take_off → repeat 4 × (forward 1, turn_right,
       //                                   forward 1, turn_left) → land.
       id: 8,
+      chapter: 2,
       caption: "Climb the staircase — the same dance, over and over",
       palette: ['take_off', 'fly_forward', 'turn_left', 'turn_right',
                 'repeat_n', 'land'],
@@ -286,6 +294,7 @@
       // from the level tabs and the boot-restore. A non-numeric id keeps it
       // out of the contiguous 1..N sequence. Nothing else references it.
       id: 'capstone',
+      chapter: 3,
       hidden: true,
       caption: "The big one — three lanes, three loops! Climb, weave down, then collect it all.",
       palette: ['take_off_loop', 'fly_forward', 'fly_up', 'fly_down',
@@ -346,6 +355,7 @@
       // meaningless, and a crash gets the honest "too tall to fly over"
       // message instead of advice the kid can't follow. Only wall_ahead.
       id: 9,
+      chapter: 3,
       caption: "Fly until you reach the wall, then land!",
       palette: ['take_off', 'fly_until', 'wall_ahead', 'land'],
       zones: [
@@ -360,6 +370,7 @@
       // of the wall. Solution: take off → fly until wall ahead →
       // turn right → fly until gone 4 units → land.
       id: 10,
+      chapter: 3,
       caption: "Reach the wall, then turn and travel to land beside it!",
       palette: ['take_off', 'fly_until', 'wall_ahead', 'gone_units',
                 'turn_left', 'turn_right', 'land'],
@@ -406,6 +417,7 @@
       //     fly until gone 2          // no wall past the pad — count instead
       //     land
       id: 11,
+      chapter: 3,
       caption: "Spiral in for all six — fly until the wall, grab, turn and repeat!",
       palette: ['take_off_loop', 'fly_until', 'wall_ahead', 'gone_units',
                 'turn_right', 'repeat_n', 'land_loop'],

@@ -119,6 +119,15 @@
           <span class="card__tab-num">2</span>
           <span class="card__tab-label">your flight plan</span>
         </div>
+        <button class="card__action card__action--undo" id="undo-btn" type="button"
+                title="oops — undo the last change">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M8.5 5.5 L4 9.5 L8.5 13.5 M4.5 9.5 H14 a5.5 5.5 0 0 1 0 11 H9"
+                  fill="none" stroke="currentColor" stroke-width="2"
+                  stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          <span>undo</span>
+        </button>
         <button class="card__action" id="clear-btn" type="button" title="throw away all blocks">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M5 7 H19 M9 7 V5 a2 2 0 0 1 2 -2 h2 a2 2 0 0 1 2 2 V7
@@ -227,6 +236,13 @@
 # this is where their secret recipe shows up</code></pre>
       </div>
     </section>
+
+    <!-- the one destructive control — below the grown-ups drawer,
+         right-aligned, confirmation on click (wired in app.js) -->
+    <button class="page-reset" id="reset-progress-btn" type="button"
+            title="erase every level's saved blocks and all the stars">
+      start fresh — erase all progress &amp; stars
+    </button>
 
     <script src="theme.js"></script>
     <script src="blocks.js"></script>
