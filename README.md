@@ -39,9 +39,13 @@ A drawer quietly shows the **real Python** the blocks generate, growing alongsid
 ## For grown-ups / tinkerers
 
 - Plain HTML/CSS/JS, **no build step** — open `crazyflie-blockly/frontend/index.html` or serve it with `python3 -m http.server`.
-- The browser runs a local simulator; a small Python bridge (`crazyflie-blockly/bridge/`) will fly a real Crazyflie over `cflib` when the hardware's connected.
-- Architecture, design decisions, and how to extend it: [CLAUDE.md](CLAUDE.md).
-- Local dev setup (macOS): [SETUP.md](SETUP.md).
+- **Flying a real drone:** the browser sends the kid's generated Python over a
+  WebSocket to a small local bridge (`crazyflie-blockly/bridge/` — `uv sync`,
+  then `uv run python server.py`), which drives the drone through
+  [`cflib`](https://github.com/bitcraze/crazyflie-lib-python) and a Crazyradio
+  2.0 dongle. Flip the app to **real drone** mode and the very same blocks fly
+  the real thing — the simulator and the drone run identical code.
+- Step-by-step environment setup (macOS): [SETUP.md](SETUP.md).
 
 ## Hardware (optional)
 

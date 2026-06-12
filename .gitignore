@@ -19,3 +19,6 @@ venv/
 # Local screen recordings (source for docs/preview.gif)
 preview.mov
 *.mov
+
+# Project working notes for Claude Code — local only, not for the public repo
+CLAUDE.md
