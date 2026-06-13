@@ -74,7 +74,7 @@
     btn.dataset.block = item.type;
     btn.draggable = true;
     btn.innerHTML = `${ICONS[item.iconKey] || ''}<span class="tile__label">${item.label}</span>${item.hint ? `<span class="tile__hint">${item.hint}</span>` : ''}`;
-    btn.addEventListener('click', () => insertBlock(item.type));
+    btn.addEventListener('click', () => bf.insertBlock(item.type));
     btn.addEventListener('dragstart', (e) => {
       e.dataTransfer.effectAllowed = 'copy';
       e.dataTransfer.setData('text/plain', item.type);
@@ -83,20 +83,31 @@
   }
 
   // ----- Active-block tracking + visual cue -----------------------------
-  // `lastActive` is the anchor for the next click-insert. It glows softly so
-  // the kid can see where new blocks will attach. Updated on create / move /
-  // selection — whichever happened most recently.
-  let lastActive = null;
-  function setLastActive(blk) {
-    if (lastActive && lastActive !== blk) {
-      const root = lastActive.getSvgRoot?.();
+  // The anchor for the next click-insert (and the floating-toolbar target)
+  // lives in the BlockFlow module now — see blockflow.js. It owns the
+  // `lastActive` / `internalRearrange` / `rearrangeTargetBlock` state machine
+  // and ALL the connection-graph decisions; app.js keeps only the
+  // rendering side-effects, wired in via the hooks below.
+  //
+  // `lastActive()` reads the module's current anchor; `setLastActive(blk)`
+  // sets it through the module so the glow/toolbar update goes through the
+  // single onActiveChanged path. The anchor glows softly so the kid can see
+  // where new blocks will attach.
+  let bf;   // BlockFlow instance — created just below (needs the hooks defined first).
+  const lastActive = () => bf.getLastActive();
+  function setLastActive(blk) { bf.setLastActive(blk); }
+  // The glow side-effect that used to live inline in setLastActive: add /
+  // remove 'drone-active' on the previously-/newly-active block's SVG root,
+  // then reposition the floating toolbar.
+  let glowingBlock = null;
+  function applyActiveGlow(blk) {
+    if (glowingBlock && glowingBlock !== blk) {
+      const root = glowingBlock.getSvgRoot?.();
       if (root) root.classList.remove('drone-active');
     }
-    // Reject disposed blocks too — a block deleted as part of a chain
-    // keeps a truthy .workspace, so .workspace alone is not enough.
-    lastActive = blk && blk.workspace && !blk.disposed ? blk : null;
-    if (lastActive) {
-      const root = lastActive.getSvgRoot?.();
+    glowingBlock = blk || null;
+    if (glowingBlock) {
+      const root = glowingBlock.getSvgRoot?.();
       if (root) root.classList.add('drone-active');
     }
     positionToolbar();
@@ -117,19 +128,21 @@
   toolbarEl.addEventListener('click', (e) => {
     const btn = e.target.closest('.block-tool');
     if (!btn || btn.classList.contains('is-disabled')) return;
-    if (!lastActive || !lastActive.workspace) return;
+    const active = lastActive();
+    if (!active || !active.workspace) return;
     const action = btn.dataset.action;
-    if      (action === 'delete') deleteActiveBlock();
-    else if (action === 'up')     moveActiveBlock('up');
-    else if (action === 'down')   moveActiveBlock('down');
+    if      (action === 'delete') bf.deleteActiveBlock();
+    else if (action === 'up')     bf.moveActiveBlock('up');
+    else if (action === 'down')   bf.moveActiveBlock('down');
   });
 
   function positionToolbar() {
-    if (!lastActive || !lastActive.workspace) {
+    const active = lastActive();
+    if (!active || !active.workspace) {
       toolbarEl.classList.remove('is-visible');
       return;
     }
-    const root = lastActive.getSvgRoot?.();
+    const root = active.getSvgRoot?.();
     if (!root) {
       toolbarEl.classList.remove('is-visible');
       return;
@@ -144,271 +157,29 @@
   }
 
   function updateToolbarButtons() {
-    toolbarUpBtn.classList.toggle('is-disabled', !canMoveUp(lastActive));
-    toolbarDownBtn.classList.toggle('is-disabled', !canMoveDown(lastActive));
+    const active = lastActive();
+    toolbarUpBtn.classList.toggle('is-disabled', !bf.canMoveUp(active));
+    toolbarDownBtn.classList.toggle('is-disabled', !bf.canMoveDown(active));
   }
 
-  function deleteActiveBlock() {
-    if (!lastActive || !lastActive.workspace) return;
-    // Capture neighbours BEFORE disposing so we can pick a sensible
-    // anchor for the kid's next click-to-insert (otherwise the next
-    // block lands stranded at top-left of the workspace).
-    const nextNeighbour = lastActive.getNextBlock();
-    const prevNeighbour = lastActive.getPreviousBlock();
-    Blockly.Events.setGroup(true);
-    try {
-      lastActive.dispose(true /* heal stack */);
-    } finally {
-      Blockly.Events.setGroup(false);
-    }
-    // Prefer NEXT over PREV: when the deleted block was first in a
-    // repeat body, getPreviousBlock() returns the enclosing repeat,
-    // which would anchor follow-up inserts OUTSIDE the body — wrong.
-    // The next block (now the body's new first block) is the right
-    // anchor instead.
-    let replacement = (nextNeighbour && nextNeighbour.workspace) ? nextNeighbour : null;
-    if (!replacement && prevNeighbour && prevNeighbour.workspace) replacement = prevNeighbour;
-    if (!replacement) {
-      // No neighbours — fall back to the bottom of any remaining top
-      // stack so click-to-insert still appends instead of starting
-      // fresh in a corner.
-      const tops = workspace.getTopBlocks(true);
-      if (tops.length) {
-        let bottom = tops[0];
-        while (bottom.getNextBlock()) bottom = bottom.getNextBlock();
-        replacement = bottom;
-      }
-    }
-    setLastActive(replacement);
-    refreshCode();
-    updateHintVisibility();
-  }
+  // The toolbar reorder/delete primitives, the canMoveUp/Down predicates,
+  // and ALL the block-move helpers (moveBlockUp/Down, swapBlocks, the
+  // splice/dive-in/dive-out primitives) now live in blockflow.js — see
+  // `bf.deleteActiveBlock`, `bf.moveActiveBlock`, `bf.canMoveUp/Down`. They
+  // were pure connection-graph logic with no DOM side-effects; the rendering
+  // tails (refreshCode, settleViewAndFocus, positionToolbar) are wired back
+  // in via the BlockFlow hooks (onStructureChanged / onBlockSettled).
 
-  function moveActiveBlock(dir) {
-    const block = lastActive;
-    if (!block || !block.workspace) return;
-    // Block the change listener's BLOCK_MOVE → setLastActive logic for
-    // the duration of this programmatic move. Blockly fires a
-    // BLOCK_MOVE for every block whose position shifted (often two or
-    // three during a swap) AND defers them via setTimeout(0), so a
-    // plain post-move setLastActive(block) gets clobbered as soon as
-    // the deferred events fire. The flag stays true past those events
-    // (reset on a setTimeout(0) of its own, which queues *after* the
-    // event firings) so the kid's clicked block keeps the focus.
-    // Lock focus to the block the kid just acted on. Blockly fires
-    // multiple BLOCK_MOVE events for the swap AND for late layout
-    // updates (e.g. when the number editor opens) — without a sticky
-    // lock the listener would chase the LAST moved block and the
-    // toolbar would slide off to the neighbour. The lock is cleared
-    // on the next user-driven SELECTED / BLOCK_DRAG event.
-    internalRearrange = true;
-    rearrangeTargetBlock = block;
-    // The top block of a stack owns the stack's on-screen position. When a
-    // reorder changes which block is on top (e.g. moving the FIRST block
-    // down, so its old neighbour becomes the new top), the new top keeps
-    // its own lower coordinate and the whole stack visually jumps down a
-    // block. Pin the stack: remember the top-left before, restore it after.
-    const rootBefore = block.getRootBlock();
-    const anchorXY   = rootBefore.getRelativeToSurfaceXY();
-    Blockly.Events.setGroup(true);
-    try {
-      if (dir === 'up') moveBlockUp(block);
-      else              moveBlockDown(block);
-      const rootAfter = block.getRootBlock();
-      const cur = rootAfter.getRelativeToSurfaceXY();
-      if (cur.x !== anchorXY.x || cur.y !== anchorXY.y) {
-        rootAfter.moveBy(anchorXY.x - cur.x, anchorXY.y - cur.y);
-      }
-    } finally {
-      Blockly.Events.setGroup(false);
-    }
-    refreshCode();
-    setTimeout(() => {
-      setLastActive(block);
-      settleViewAndFocus(block);
-      requestAnimationFrame(positionToolbar);
-    }, 0);
-  }
-
-  // ----- Block move helpers --------------------------------------------
   // Robust "is this a statement input" check that doesn't depend on a
-  // specific Blockly enum being defined in the compressed bundle.
+  // specific Blockly enum being defined in the compressed bundle. The
+  // module has its own copy for the move logic; this app-side copy is kept
+  // for the highlightBlock clone (which needs to skip statement-body blocks).
   function isStatementInput(input) {
     if (!input || !input.connection) return false;
     if (Blockly.inputTypes && input.type === Blockly.inputTypes.STATEMENT) return true;
     if (Blockly.NEXT_STATEMENT !== undefined && input.connection.type === Blockly.NEXT_STATEMENT) return true;
     // Raw enum value as a final fallback.
     return input.connection.type === 3;
-  }
-  function isStatementInputConn(conn) {
-    if (!conn || !conn.getParentInput) return false;
-    return isStatementInput(conn.getParentInput());
-  }
-  function getStatementInput(block) {
-    if (!block || !block.inputList) return null;
-    for (const input of block.inputList) {
-      if (isStatementInput(input)) return input;
-    }
-    return null;
-  }
-  function findContainingBlock(block) {
-    // Walks up the chain to the FIRST block in its body, then returns
-    // the parent block (the one whose statement input we live in).
-    let top = block;
-    while (true) {
-      const prevConn = top.previousConnection && top.previousConnection.targetConnection;
-      if (!prevConn) return null;
-      if (isStatementInputConn(prevConn)) return prevConn.getSourceBlock();
-      top = prevConn.getSourceBlock();
-    }
-  }
-
-  function canMoveUp(block) {
-    if (!block || !block.previousConnection) return false;
-    const prevConn = block.previousConnection.targetConnection;
-    if (!prevConn) return false;          // free-floating, nothing above
-    if (isStatementInputConn(prevConn)) {
-      // First in a body — exiting upward inserts block before the
-      // container in the parent chain. That requires nextConnection.
-      return !!block.nextConnection;
-    }
-    const prevBlock = prevConn.getSourceBlock();
-    if (!prevBlock.previousConnection) return false;  // can't swap past a starter
-    if (getStatementInput(prevBlock)) {
-      // Diving INTO the bottom of a repeat — block becomes the body's
-      // last block. Only needs previousConnection (already checked).
-      return true;
-    }
-    // Plain swap with the block above — both connectors required.
-    return !!block.nextConnection;
-  }
-  function canMoveDown(block) {
-    if (!block || !block.nextConnection) return false;
-    const nextBlock = block.getNextBlock();
-    if (!nextBlock) {
-      // At end of a body — exit downward needs previousConnection (to
-      // connect to the container's nextConnection). If the container
-      // has its own next block in the parent chain, we also need
-      // block's nextConnection so that block can be spliced in
-      // BETWEEN container and that next block without orphaning it.
-      const container = findContainingBlock(block);
-      if (!container) return false;
-      if (!block.previousConnection) return false;
-      const afterContainer = container.getNextBlock();
-      if (afterContainer && !block.nextConnection) return false;
-      return true;
-    }
-    const stmt = getStatementInput(nextBlock);
-    if (stmt) {
-      // Diving INTO the top of a repeat — block becomes the body's
-      // first block. Always needs previousConnection. If the body
-      // already has a first block, we also need nextConnection so the
-      // existing block stays linked behind us rather than orphaned.
-      if (!block.previousConnection) return false;
-      const bodyHasFirst = !!stmt.connection.targetBlock();
-      if (bodyHasFirst && !block.nextConnection) return false;
-      return true;
-    }
-    if (!nextBlock.nextConnection) return false;     // next is a terminator
-    return !!block.previousConnection;
-  }
-
-  function moveBlockUp(block) {
-    if (!canMoveUp(block)) return;
-    const prevConn  = block.previousConnection.targetConnection;
-    const prevBlock = prevConn.getSourceBlock();
-    if (isStatementInputConn(prevConn)) {
-      // First in a body — exit upward, become previous sibling of the container.
-      moveBlockBefore(block, prevBlock);
-      return;
-    }
-    const stmt = getStatementInput(prevBlock);
-    if (stmt) {
-      // prevBlock is a repeat-like container — dive INTO the bottom of its body.
-      moveBlockToEndOfInput(block, stmt);
-      return;
-    }
-    // Plain swap with the block above.
-    swapBlocks(block, prevBlock);
-  }
-  function moveBlockDown(block) {
-    if (!canMoveDown(block)) return;
-    const nextBlock = block.getNextBlock();
-    if (!nextBlock) {
-      // At end of a body — exit downward, become next sibling of the container.
-      const container = findContainingBlock(block);
-      if (container) moveBlockAfter(block, container);
-      return;
-    }
-    const stmt = getStatementInput(nextBlock);
-    if (stmt) {
-      // nextBlock is a repeat-like container — dive INTO the top of its body.
-      moveBlockToStartOfInput(block, stmt);
-      return;
-    }
-    // Plain swap with the block below (block goes under nextBlock).
-    swapBlocks(nextBlock, block);
-  }
-
-  // Insert `block` immediately before `target` in target's chain.
-  function moveBlockBefore(block, target) {
-    if (!target.previousConnection) return;
-    const aboveConn = target.previousConnection.targetConnection;
-    block.unplug(true);
-    if (aboveConn) aboveConn.disconnect();
-    if (block.nextConnection) block.nextConnection.connect(target.previousConnection);
-    if (aboveConn) aboveConn.connect(block.previousConnection);
-  }
-  // Insert `block` immediately after `target` in target's chain.
-  function moveBlockAfter(block, target) {
-    if (!target.nextConnection) return;
-    const next     = target.getNextBlock();
-    const nextConn = target.nextConnection.targetConnection;
-    block.unplug(true);
-    if (nextConn) nextConn.disconnect();
-    target.nextConnection.connect(block.previousConnection);
-    if (next && block.nextConnection) {
-      block.nextConnection.connect(next.previousConnection);
-    }
-  }
-  // Drop `block` at the bottom of `input`'s body.
-  function moveBlockToEndOfInput(block, input) {
-    let last = input.connection.targetBlock();
-    if (last) {
-      while (last.getNextBlock()) last = last.getNextBlock();
-    }
-    block.unplug(true);
-    if (last && last.nextConnection) {
-      last.nextConnection.connect(block.previousConnection);
-    } else {
-      input.connection.connect(block.previousConnection);
-    }
-  }
-  // Drop `block` at the top of `input`'s body (the rest of the body
-  // shifts down).
-  function moveBlockToStartOfInput(block, input) {
-    const first = input.connection.targetBlock();
-    block.unplug(true);
-    if (first) {
-      input.connection.disconnect();
-      input.connection.connect(block.previousConnection);
-      if (block.nextConnection) {
-        block.nextConnection.connect(first.previousConnection);
-      }
-    } else {
-      input.connection.connect(block.previousConnection);
-    }
-  }
-  // Swap two adjacent blocks. `lower` is initially below `upper`; after
-  // this call they trade positions (lower is above, upper is below).
-  function swapBlocks(lower, upper) {
-    const aboveConn = upper.previousConnection.targetConnection;
-    lower.unplug(true);   // heal: upper now connects to lower's old tail
-    if (upper.previousConnection.isConnected()) {
-      upper.previousConnection.disconnect();
-    }
-    if (aboveConn) aboveConn.connect(lower.previousConnection);
-    if (lower.nextConnection) lower.nextConnection.connect(upper.previousConnection);
   }
 
   // ----- Auto-focus number field on insert / move -----------------------
@@ -426,134 +197,11 @@
     }
   }
 
-  function insertBlock(type) {
-    let newBlk;
-    Blockly.Events.setGroup(true);
-    try {
-      newBlk = workspace.newBlock(type);
-      newBlk.initSvg();
-      newBlk.render();
-      try {
-        anchorBlock(newBlk);
-      } catch (err) {
-        // Belt and braces: a bad anchor must NEVER eat the kid's click —
-        // a block has to appear no matter what. Drop the anchor and
-        // re-place via the (exception-free) no-anchor path.
-        console.warn('insertBlock: anchoring failed, placing block free', err);
-        setLastActive(null);
-        anchorBlock(newBlk);
-      }
-    } finally {
-      Blockly.Events.setGroup(false);
-    }
-    // A condition that plugged into a slot keeps the anchor on its
-    // PARENT statement block, so the next flight block still chains
-    // onto the sequence rather than dangling off the condition.
-    const plugged = newBlk.outputConnection && newBlk.getParent();
-    setLastActive(plugged ? newBlk.getParent() : newBlk);
-    refreshCode();
-    updateHintVisibility();
-    // Settle the view (scroll-lock + scroll a bottom block into view if
-    // the stack overflows) and then open the inline number editor, so the
-    // kid can type a value right away without a second tap — and so no
-    // late scroll dismisses the auto-selected value.
-    setTimeout(() => settleViewAndFocus(newBlk), 0);
-  }
-
-  // Choose where a freshly-created block goes:
-  //   - if it has a previous-connection AND there's an active chain with an
-  //     open bottom, snap it onto the bottom of that chain
-  //   - otherwise place it just below the active block (so the kid sees it
-  //     appear right where their attention is)
-  //   - if there's no active block at all, place at top-left
-  // Find an empty value-input (e.g. a "fly until" condition slot) on a
-  // block, so condition blocks click-to-plug into it.
-  function findEmptyValueInput(block) {
-    if (!block || !block.inputList) return null;
-    for (const input of block.inputList) {
-      const c = input.connection;
-      if (c && (c.type === Blockly.INPUT_VALUE || c.type === 1) && !c.targetBlock()) {
-        return input;
-      }
-    }
-    return null;
-  }
-
-  function anchorBlock(newBlk) {
-    const anchorOk = lastActive && lastActive.workspace && !lastActive.disposed;
-    let anchor = anchorOk ? lastActive : null;
-
-    // If the active block is a condition (a value block plugged into a
-    // slot), treat its containing statement block as the anchor — so
-    // clicking another flight block keeps building the same stack
-    // instead of dangling off the condition.
-    if (anchor && anchor.outputConnection && !newBlk.outputConnection) {
-      const parent = anchor.getParent();
-      if (parent) anchor = parent;
-    }
-
-    // Condition / value blocks (output, no previous): plug into an open
-    // value input on the active block or its chain (the "fly until" slot).
-    if (newBlk.outputConnection) {
-      let host = anchor;
-      while (host) {
-        const input = findEmptyValueInput(host);
-        if (input) { input.connection.connect(newBlk.outputConnection); return; }
-        host = host.getNextBlock();
-      }
-      // No slot found — drop it near the active block (kid can drag it in).
-      const base = anchor || null;
-      const xy = base ? base.getRelativeToSurfaceXY() : { x: 40, y: 40 };
-      newBlk.moveBy(xy.x + 30, xy.y + 40);
-      return;
-    }
-
-    if (!anchor) {
-      // Place the first block near the TOP, slightly LEFT of centre.
-      // The view is pinned to scroll(0,0) whenever the blocks fit (see
-      // applyWorkspaceMobility), so workspace coords ≈ on-screen pixels.
-      const m = workspace.getMetrics();
-      const scale = workspace.scale || 1;
-      const hw = newBlk.getHeightWidth(); // workspace units (unscaled)
-      const viewW = (m ? m.viewWidth : 400) / scale;
-      const off = workspace.getTopBlocks(false).length * 16; // extra tops cascade
-      // Sit it well left of centre — leaves room to the right for the
-      // floating ↑ ↓ ✕ toolbar and for blocks/conditions that grow wider.
-      const targetX = Math.max(16, viewW / 2 - hw.width / 2 - 70) + off;
-      const targetY = 22 + off;
-      const cur = newBlk.getRelativeToSurfaceXY();
-      newBlk.moveBy(targetX - cur.x, targetY - cur.y);
-      return;
-    }
-
-    // A container anchor swallows the next block: when the glowing block
-    // is a repeat (later: an if), the kid's next tap means "put this
-    // INSIDE it" — so connect at the end of its body, not after the
-    // chain. Once the new block anchors itself, follow-up taps keep
-    // chaining within the body.
-    if (newBlk.previousConnection) {
-      const bodyInput = (anchor.inputList || []).find(isStatementInput);
-      if (bodyInput) {
-        moveBlockToEndOfInput(newBlk, bodyInput);
-        return;
-      }
-    }
-
-    // walk to bottom of anchor's chain
-    let bottom = anchor;
-    while (bottom.nextConnection?.targetBlock()) {
-      bottom = bottom.nextConnection.targetBlock();
-    }
-
-    if (newBlk.previousConnection && bottom.nextConnection) {
-      bottom.nextConnection.connect(newBlk.previousConnection);
-      return;
-    }
-
-    // can't connect — drop just below the anchor's chain
-    const xy = bottom.getRelativeToSurfaceXY();
-    newBlk.moveBy(xy.x, xy.y + 60);
-  }
+  // Click-to-insert (palette tile → bf.insertBlock) and its anchorBlock
+  // placement decision now live in blockflow.js. The connection logic is
+  // verbatim there; the rendering tails (initSvg/render, refreshCode +
+  // updateHintVisibility, settleViewAndFocus) are wired back via the
+  // BlockFlow hooks (initBlockSvg / onStructureChanged / onBlockSettled).
 
   // ----- Drag-from-palette into workspace -------------------------------
   host.addEventListener('dragover', (e) => {
@@ -571,35 +219,14 @@
     host.classList.remove('drag-over');
     const type = e.dataTransfer.getData('text/plain');
     if (!type) return;
-    insertBlockAt(type, e.clientX, e.clientY);
+    // The module owns the placement + nearest-connection snap; it calls
+    // back into clientToWorkspace (below) to translate the drop point.
+    bf.insertBlockAt(type, e.clientX, e.clientY);
   });
 
-  function insertBlockAt(type, clientX, clientY) {
-    let newBlk;
-    Blockly.Events.setGroup(true);
-    try {
-      newBlk = workspace.newBlock(type);
-      newBlk.initSvg();
-      newBlk.render();
-
-      const ws = clientToWorkspace(clientX, clientY);
-      const cur = newBlk.getRelativeToSurfaceXY();
-      newBlk.moveBy(ws.x - cur.x - 30, ws.y - cur.y - 18);
-
-      // Try to snap to a nearby compatible connection so the kid doesn't
-      // have to land it perfectly on a stack.
-      if (!trySnapToNearest(newBlk, 50)) {
-        // standalone — that's fine, leave it where it was dropped
-      }
-    } finally {
-      Blockly.Events.setGroup(false);
-    }
-    setLastActive(newBlk);
-    refreshCode();
-    updateHintVisibility();
-    setTimeout(() => focusFirstNumberField(newBlk), 0);
-  }
-
+  // Client → workspace coord translation needs the live injection-div rect,
+  // so it stays app-side and is handed to the module via the
+  // clientToWorkspace hook (insertBlockAt calls it).
   function clientToWorkspace(clientX, clientY) {
     const inj = workspace.getInjectionDiv().getBoundingClientRect();
     const scale = workspace.scale || 1;
@@ -609,23 +236,6 @@
       x: (clientX - inj.left - sx) / scale,
       y: (clientY - inj.top  - sy) / scale,
     };
-  }
-
-  function trySnapToNearest(blk, threshold) {
-    if (!blk.previousConnection) return false;
-    const my = blk.previousConnection;
-    let best = null, bestDist = threshold;
-    for (const other of workspace.getAllBlocks(false)) {
-      if (other === blk) continue;
-      const nc = other.nextConnection;
-      if (!nc || nc.targetBlock()) continue;
-      const dx = (nc.x ?? 0) - (my.x ?? 0);
-      const dy = (nc.y ?? 0) - (my.y ?? 0);
-      const d = Math.hypot(dx, dy);
-      if (d < bestDist) { bestDist = d; best = nc; }
-    }
-    if (best) { best.connect(my); return true; }
-    return false;
   }
 
   // ----- Simulator -------------------------------------------------------
@@ -874,15 +484,9 @@
       if (raw) {
         Blockly.serialization.workspaces.load(JSON.parse(raw), workspace);
         // Re-anchor click-to-insert at the bottom of the first chain so
-        // the kid can keep appending right where she left off.
-        const tops = workspace.getTopBlocks(true);
-        if (tops.length) {
-          let bottom = tops[0];
-          while (bottom.nextConnection?.targetBlock()) {
-            bottom = bottom.nextConnection.targetBlock();
-          }
-          setLastActive(bottom);
-        }
+        // the kid can keep appending right where she left off. (The walk
+        // to the chain bottom + setLastActive lives in the module.)
+        bf.restoreAnchor();
       }
       const scrollRaw = localStorage.getItem(SCROLL_STORAGE_PREFIX + levelId);
       if (scrollRaw) {
@@ -913,12 +517,20 @@
     // Fit the canvas zoom so every zone in this level is comfortably on
     // screen. Reset each time — switching levels gives the kid a fresh
     // view regardless of how she'd zoomed/panned the previous level.
-    drone.setPan(0, 0);
+    // A level may slide its initial view DOWN (home_pan_y_px > 0) — unlike
+    // home_y_inset_px, this is a pure pan applied AFTER the fit, so it
+    // doesn't feed back into autoFitZoom and re-zoom away. Tall levels use
+    // it to drop the drone toward the bottom edge and bring the far
+    // landing pad into frame.
+    drone.setPan(0, lvl.home_pan_y_px || 0);
     applyCanvasZoom(autoFitZoom(lvl));
     // Fresh workspace per level — clear first, then drop in whatever
     // the kid had built on this level before (if anything).
     workspace.clear();
-    setLastActive(null);
+    // Drop the click anchor AND release any sticky toolbar rearrange lock,
+    // so a move on the previous level can't leak its lock into this one
+    // (same fix as start-over — see blockflow.onLevelReset/endRearrangeLock).
+    bf.onLevelReset();
     // New level → re-evaluate fit from a clean slate (a restore below may
     // flip it again). Reset lastFits so the rescue-recenter can fire.
     lastFits = null;
@@ -1024,15 +636,10 @@
   }
 
   let persistTimer = null;
-  // While a programmatic move is in flight (and for its long tail of
-  // late BLOCK_MOVE events), keep focus pinned to the block the kid
-  // acted on. The lock is cleared by the next user-driven action.
-  let internalRearrange = false;
-  let rearrangeTargetBlock = null;
-  function endRearrangeLock() {
-    internalRearrange = false;
-    rearrangeTargetBlock = null;
-  }
+  // The sticky rearrange lock (internalRearrange / rearrangeTargetBlock,
+  // which keeps focus pinned across Blockly's deferred BLOCK_MOVE tail of a
+  // toolbar swap) now lives in blockflow.js. The change listener forwards
+  // events into bf.onWorkspaceEvent for those branches.
   // ----- Lock the workspace view when the blocks already fit ------------
   // Blockly pads the scrollable area far past the content, so by default
   // you can always drag/scroll into empty space — which lets a kid pan
@@ -1110,12 +717,18 @@
     if (!root) return;
     const svgRect   = workspace.getParentSvg().getBoundingClientRect();
     const blockRect = root.getBoundingClientRect();
-    const margin = 28;  // gap kept below the block so it reads as "just added"
-    const overshootBottom = blockRect.bottom - (svgRect.bottom - margin);
-    if (overshootBottom > 0) {
-      // Move content up: smaller scrollY translates the canvas upward.
-      workspace.scroll(workspace.scrollX, workspace.scrollY - overshootBottom);
-    }
+    // The decision — including the "don't scroll when the stack FITS, or the
+    // whole tower visibly jumps and snaps back on every toolbar move" rule —
+    // lives in the pure, headless-unit-tested ViewFit.scrollIntoViewDelta.
+    // Callers run flushWorkspaceMobility() first, so lastFits is fresh:
+    // false === overflow, true/null === fits. We only measure/apply here.
+    const delta = ViewFit.scrollIntoViewDelta({
+      overflowing: lastFits === false,
+      blockBottomPx: blockRect.bottom,
+      viewBottomPx: svgRect.bottom,
+      margin: 28,
+    });
+    if (delta !== 0) workspace.scroll(workspace.scrollX, workspace.scrollY + delta);
   }
   // The ordered tail of every insert/move: settle the view (scroll-lock +
   // bring the block on-screen) and ONLY THEN open the inline number
@@ -1127,41 +740,42 @@
     focusFirstNumberField(block);
   }
 
+  // ----- BlockFlow module instance --------------------------------------
+  // Owns the connection-graph decisions + the anchor / rearrange state
+  // machine; app.js supplies the rendering side-effects as hooks. Created
+  // here, after every hook function above is defined. Palette clicks /
+  // drops / the toolbar handler / the change listener (all wired earlier or
+  // below) call through `bf`.
+  bf = window.BlockFlow.create(workspace, {
+    // initSvg()+render() — kept out of the headless tests
+    initBlockSvg: (block) => { block.initSvg(); block.render(); },
+    // apply / remove the 'drone-active' glow + reposition the toolbar
+    onActiveChanged: applyActiveGlow,
+    // refreshCode + updateHintVisibility (the inline tails of insert/move/
+    // delete, and the listener tail)
+    onStructureChanged: () => { refreshCode(); updateHintVisibility(); },
+    // the deferred settle-view-and-focus / number-editor-focus tail; also
+    // re-pins the toolbar after a move (was the rAF positionToolbar in
+    // moveActiveBlock)
+    onBlockSettled: (block) => { settleViewAndFocus(block); requestAnimationFrame(positionToolbar); },
+    // toggle the floating toolbar's is-hidden during a real drag; re-pin it
+    // on drag end (was the inline BLOCK_DRAG branch)
+    onToolbarHidden: (hidden) => {
+      toolbarEl.classList.toggle('is-hidden', hidden);
+      if (!hidden) requestAnimationFrame(positionToolbar);
+    },
+    // client → workspace coord translation for drag-drop (needs the live
+    // injection rect, so it stays app-side)
+    clientToWorkspace,
+  });
+
   workspace.addChangeListener((e) => {
-    // Anchor tracking — fire on UI events too (SELECTED is a UI event)
-    if (e.type === Blockly.Events.SELECTED && e.newElementId) {
-      // User clicked a block. If it's different from our rearrange
-      // target, the kid has moved on and we should release the lock.
-      if (rearrangeTargetBlock && e.newElementId !== rearrangeTargetBlock.id) {
-        endRearrangeLock();
-      }
-      const blk = workspace.getBlockById(e.newElementId);
-      if (blk) setLastActive(blk);
-    } else if (e.type === Blockly.Events.BLOCK_MOVE && e.blockId) {
-      if (internalRearrange && rearrangeTargetBlock && rearrangeTargetBlock.workspace) {
-        // Late event from the rearrange — force focus back to the
-        // block the kid acted on, regardless of which block Blockly
-        // happens to report moved.
-        setLastActive(rearrangeTargetBlock);
-      } else {
-        const blk = workspace.getBlockById(e.blockId);
-        if (blk) setLastActive(blk);
-      }
-    } else if (e.type === Blockly.Events.BLOCK_DELETE && lastActive &&
-               (e.blockId === lastActive.id || e.ids?.includes(lastActive.id))) {
-      // e.ids lists EVERY deleted block (a chain deletes its descendants in
-      // one event, blockId is only the top). Missing a descendant here left
-      // lastActive pointing at a disposed block whose .workspace is still
-      // truthy — and the next click-insert would connect the new block
-      // into the dead chain, swallowing it invisibly.
-      setLastActive(null);
-    } else if (e.type === Blockly.Events.BLOCK_DRAG) {
-      // User started a real drag — release the rearrange lock and hide
-      // the floating toolbar so it doesn't trail the drag preview.
-      if (e.isStart) endRearrangeLock();
-      toolbarEl.classList.toggle('is-hidden', !!e.isStart);
-      if (!e.isStart) requestAnimationFrame(positionToolbar);
-    } else if (e.type === Blockly.Events.VIEWPORT_CHANGE) {
+    // Anchor tracking + the rearrange-lock state machine live in the module
+    // now; forward every event so its SELECTED / BLOCK_MOVE / BLOCK_DELETE /
+    // BLOCK_DRAG-isStart branches run (and the toolbar-hide hook fires).
+    bf.onWorkspaceEvent(e);
+    // App-side view concerns that aren't part of the connection graph:
+    if (e.type === Blockly.Events.VIEWPORT_CHANGE) {
       positionToolbar();
       // Wheel-zooming the workspace can push content over/under the fit
       // threshold; re-evaluate. (scrollCenter only fires on the
@@ -1583,10 +1197,11 @@
   // ----- Start over: clear all blocks ------------------------------------
   document.getElementById('clear-btn').addEventListener('click', () => {
     if (workspace.getAllBlocks(false).length === 0) return;
-    setLastActive(null);
-    workspace.clear();
-    refreshCode();
-    updateHintVisibility();
+    // The block-flow side (setLastActive(null) + workspace.clear() +
+    // endRearrangeLock + refreshCode/updateHintVisibility) lives in
+    // bf.startOver(). Releasing the rearrange lock there is the fix for the
+    // superpose-after-start-over bug (covered by test/linking-*.test.mjs).
+    bf.startOver();
     drone.reset();
     setResetMode(false);
   });
@@ -1597,8 +1212,9 @@
   // stack already — this just gives it a button.
   document.getElementById('undo-btn').addEventListener('click', () => {
     workspace.undo(false);
-    // The click-insert anchor may have been undone out of existence.
-    if (lastActive && !workspace.getBlockById(lastActive.id)) setLastActive(null);
+    // The click-insert anchor may have been undone out of existence —
+    // the module drops a stale anchor whose block no longer exists.
+    bf.reconcileAnchorAfterUndo();
     refreshCode();
     updateHintVisibility();
   });
@@ -1703,7 +1319,7 @@
 
   // Double-click to recenter: reset pan + re-fit zoom to the level.
   canvas.addEventListener('dblclick', () => {
-    drone.setPan(0, 0);
+    drone.setPan(0, currentLevel.home_pan_y_px || 0);
     applyCanvasZoom(autoFitZoom(currentLevel));
   });
 
@@ -1723,4 +1339,30 @@
     }
   } catch (_) {}
   setLevel(initialLevelId);
+
+  // Boot-time layout race: setLevel's auto-fit runs now, but the Google
+  // web fonts (Fraunces/Lexend/Caveat) usually load a beat LATER, which
+  // resizes the cards → the canvas. The existing ResizeObserver updates the
+  // canvas BACKING size when that happens, but never re-runs the fit — so
+  // the zoom/pan computed at boot stays stale and the far landing pad can
+  // sit off-frame. Canvas view isn't persisted, so it only self-heals on a
+  // level switch — which is exactly why a fresh boot looked wrong until the
+  // level was re-entered (and why "start fresh", booting to L1 then a click
+  // into the level, masked it). Re-fit the current level once fonts settle
+  // and once more after full load, so the first view is right with no
+  // interaction. Skip only if the kid has already panned the canvas (a
+  // deliberate view she shouldn't have yanked out from under her); a fresh
+  // boot is nowhere near long enough for that.
+  function refitInitialView() {
+    if (!currentLevel) return;
+    const homePan = currentLevel.home_pan_y_px || 0;
+    if (Math.abs(drone._panX) > 0.5 || Math.abs(drone._panY - homePan) > 0.5) return;
+    fitCanvas(canvas);
+    drone.setPan(0, homePan);
+    applyCanvasZoom(autoFitZoom(currentLevel));
+  }
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(() => requestAnimationFrame(refitInitialView));
+  }
+  window.addEventListener('load', () => requestAnimationFrame(refitInitialView));
 })();
