@@ -22,3 +22,6 @@ preview.mov
 
 # Project working notes for Claude Code — local only, not for the public repo
 CLAUDE.md
+
+# Headless test harness deps
+crazyflie-blockly/frontend/test/node_modules/

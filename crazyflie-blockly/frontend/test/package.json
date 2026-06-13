@@ -1,0 +1,11 @@
+{
+  "name": "drone-lab-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "blockly": "^11"
+  }
+}
