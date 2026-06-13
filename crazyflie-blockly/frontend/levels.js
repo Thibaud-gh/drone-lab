@@ -184,6 +184,52 @@
       win: { type: 'pickup_then_land', pickup: [0, 1, 2], zone: 3 },
     },
     {
+      // Chapter-2 level inserted at the 2.2 position (id stays unique at 12
+      // so existing levels' persistence / solved-state / win indices don't
+      // shift; chapter-relative labels come from array order, so sitting
+      // between id 7 and id 8 makes this 2.2 and pushes the staircase to
+      // 2.3). The over-wall / under-beam idea from L4, now as a LOOP: a
+      // straight corridor north with walls and beams alternating every
+      // 2 blocks (60 cm). Each wall must be cleared high (fly above 1),
+      // each beam low (fly below 2) — and because the height field is
+      // integer-only, NO single height clears both, so the drone genuinely
+      // has to bob up-and-over / down-and-under the whole way. The bob is
+      // the same four moves every pair of obstacles, so it's begging for a
+      // repeat.
+      //
+      //   Obstacles (flight order): wall -30, beam -90, wall -150,
+      //     beam -210, wall -270, beam -330 — then the pad at -360.
+      //   Solution: take_off → repeat 3 × (up 1, forward 2, down 1,
+      //                                     forward 2) → land.
+      //     With the loop:  ~7 blocks.   Without: ~14 (the bob ×3).
+      //   Trace: takeoff h1; each lap goes up→h2, fwd2 (over the wall at
+      //   h2), down→h1, fwd2 (under the beam at h1); altitude always
+      //   changes in the clear gap halfway between two obstacles.
+      id: 12,
+      chapter: 2,
+      caption: "Up over the walls, down under the beams — the same wiggle, again and again!",
+      palette: ['take_off', 'fly_forward', 'fly_up', 'fly_down', 'repeat_n', 'land'],
+      // It's a tall level (12 blocks deep): at the fit zoom the landing pad
+      // clips at the top edge. Slide the whole view DOWN (pure pan, applied
+      // after the fit so it doesn't re-zoom) — the drone drops toward the
+      // bottom edge and the pad comes into frame, at the unchanged zoom.
+      home_pan_y_px: 48,
+      zones: [
+        { kind: 'wall',   x_cm: 0, y_cm:  -30, w_cm: 80, h_cm: 12, over_height_cm: 30 },
+        { kind: 'beam',   x_cm: 0, y_cm:  -90, w_cm: 80, h_cm: 12, under_height_cm: 60 },
+        { kind: 'wall',   x_cm: 0, y_cm: -150, w_cm: 80, h_cm: 12, over_height_cm: 30 },
+        { kind: 'beam',   x_cm: 0, y_cm: -210, w_cm: 80, h_cm: 12, under_height_cm: 60 },
+        { kind: 'wall',   x_cm: 0, y_cm: -270, w_cm: 80, h_cm: 12, over_height_cm: 30 },
+        { kind: 'beam',   x_cm: 0, y_cm: -330, w_cm: 80, h_cm: 12, under_height_cm: 60 },
+        { kind: 'target', x_cm: 0, y_cm: -360, w_cm: 40, h_cm: 40, color: 'green' },
+      ],
+      decor: [
+        { kind: 'grass',  x_cm: -78, y_cm:  -60, s: 1.1 },
+        { kind: 'flower', x_cm:  78, y_cm: -240 },
+      ],
+      win: { type: 'land_in_zone', zone: 6 },
+    },
+    {
       // L8 — introduces the loop block in earnest. Walls force a
       // staircase path (forward, turn_right, forward, turn_left)
       // repeated 4 times. We deliberately drop fly_up / fly_down from
